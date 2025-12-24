@@ -5,7 +5,7 @@ import kotlinx.serialization.Serializable
 
 @Serializable
 data class ConversationTurn(
-    val from: String,
+    val from: String,   // "them" | "me"
     val text: String
 )
 
@@ -28,11 +28,7 @@ data class ReplyResponse(
     val ok: Boolean? = null,
     val error: String? = null,
     val details: String? = null,
-
-    // common fields you were returning
     val model: String? = null,
-
-    // Newer shape (from your screenshot):
     val request: ReplyRequestEcho? = null,
     val result: ReplyResult? = null,
 )
