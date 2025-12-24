@@ -5,38 +5,21 @@ import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.lifecycle.viewmodel.compose.viewModel
-import com.replysense.app.ui.ComposerScreen
+import com.replysense.app.ui.AppRoot
 import com.replysense.app.ui.theme.ReplySenseTheme
-import com.replysense.app.vm.ComposerViewModel
+import com.replysense.app.vm.AppViewModel
 
 class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-
-        val sharedText: String? = extractSharedText(intent)
+        val sharedText = extractSharedText(intent)
 
         setContent {
             ReplySenseTheme {
-                val vm: ComposerViewModel = viewModel()
-                // Apply shared text once
+                val vm: AppViewModel = viewModel()
                 if (!sharedText.isNullOrBlank()) vm.applyIncomingTextOnce(sharedText)
-                ComposerScreen(vm = vm)
-            }
-        }
-    }
-
-    override fun onNewIntent(intent: Intent) {
-        super.onNewIntent(intent)
-        val sharedText = extractSharedText(intent)
-        if (!sharedText.isNullOrBlank()) {
-            // If app already open and user shares again
-            (this as ComponentActivity).setContent {
-                ReplySenseTheme {
-                    val vm: ComposerViewModel = viewModel()
-                    vm.applyIncomingTextOnce(sharedText)
-                    ComposerScreen(vm = vm)
-                }
+                AppRoot(vm)
             }
         }
     }
