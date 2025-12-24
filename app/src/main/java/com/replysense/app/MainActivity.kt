@@ -13,14 +13,21 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        val sharedText = extractSharedText(intent)
-
         setContent {
             ReplySenseTheme {
                 val vm: AppViewModel = viewModel()
-                if (!sharedText.isNullOrBlank()) vm.applyIncomingTextOnce(sharedText)
+                extractSharedText(intent)?.let { vm.applyIncomingTextOnce(it) }
                 AppRoot(vm)
             }
+        }
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        extractSharedText(intent)?.let {
+            // If user shares while app is already open, we replace the current thread with shared content
+            val vm: AppViewModel = androidx.lifecycle.viewmodel.compose.viewModel()
+            vm.applyIncomingTextForce(it)
         }
     }
 
@@ -29,6 +36,7 @@ class MainActivity : ComponentActivity() {
         if (intent.action != Intent.ACTION_SEND) return null
         val type = intent.type ?: return null
         if (!type.startsWith("text/")) return null
+
         return intent.getStringExtra(Intent.EXTRA_TEXT)
             ?: intent.getCharSequenceExtra(Intent.EXTRA_TEXT)?.toString()
     }
