@@ -6,6 +6,7 @@ import android.content.Context
 import android.content.Intent
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -18,6 +19,8 @@ import androidx.compose.material3.Card
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Divider
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.ExposedDropdownMenuBox
+import androidx.compose.material3.ExposedDropdownMenuDefaults
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
@@ -26,26 +29,31 @@ import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
-import androidx.compose.ui.util.fastForEach
-import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import com.replysense.app.net.ConversationTurn
 import com.replysense.app.vm.AppViewModel
 import com.replysense.app.vm.Preset
 
-@OptIn(ExperimentalMaterial3Api::class)
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
 @Composable
 fun ComposeScreen(vm: AppViewModel, paddingValues: PaddingValues) {
     val s = vm.state.collectAsState().value
     val context = LocalContext.current
     val snack = remember { SnackbarHostState() }
+
+    var pasteBlock by remember { mutableStateOf("") }
 
     LaunchedEffect(s.error) {
         if (!s.error.isNullOrBlank()) snack.showSnackbar(s.error!!)
@@ -54,23 +62,52 @@ fun ComposeScreen(vm: AppViewModel, paddingValues: PaddingValues) {
     Column(Modifier.padding(paddingValues)) {
         TopAppBar(
             title = { Text("ReplySense") },
-            actions = {
-                TextButton(onClick = { vm.clearAll() }) { Text("Reset") }
-            }
+            actions = { TextButton(onClick = { vm.clearAll() }) { Text("Reset") } }
         )
 
         LazyColumn(
-            modifier = Modifier
-                .padding(16.dp),
+            modifier = Modifier.padding(16.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
 
             item {
-                Text("Thread", style = MaterialTheme.typography.titleMedium)
+                Text("Smart extract", style = MaterialTheme.typography.titleMedium)
                 Text(
-                    "Add messages in order. This is the biggest quality jump you can make.",
+                    "Paste a whole convo block (with “Name: message” lines). Tap Extract to split into a thread.",
                     style = MaterialTheme.typography.bodySmall
                 )
+            }
+
+            item {
+                OutlinedTextField(
+                    value = pasteBlock,
+                    onValueChange = { pasteBlock = it },
+                    modifier = Modifier.fillMaxWidth(),
+                    minLines = 3,
+                    label = { Text("Paste conversation block") },
+                    placeholder = { Text("Me: hey\nThem: sup\nMe: you free later?") }
+                )
+            }
+
+            item {
+                Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Button(
+                        onClick = { vm.smartExtract(pasteBlock) },
+                        enabled = pasteBlock.isNotBlank()
+                    ) { Text("Extract → Thread") }
+
+                    TextButton(
+                        onClick = { pasteBlock = "" },
+                        enabled = pasteBlock.isNotBlank()
+                    ) { Text("Clear") }
+                }
+            }
+
+            item { Divider() }
+
+            item {
+                Text("Thread", style = MaterialTheme.typography.titleMedium)
+                Text("Add messages in order. More context = better replies.", style = MaterialTheme.typography.bodySmall)
             }
 
             itemsIndexed(s.turns) { idx, turn ->
@@ -94,8 +131,8 @@ fun ComposeScreen(vm: AppViewModel, paddingValues: PaddingValues) {
 
             item {
                 Text("Preset", style = MaterialTheme.typography.titleMedium)
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Preset.values().fastForEach { p ->
+                FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Preset.values().forEach { p ->
                         FilterChip(
                             selected = s.preset == p,
                             onClick = { vm.setPreset(p) },
@@ -104,27 +141,87 @@ fun ComposeScreen(vm: AppViewModel, paddingValues: PaddingValues) {
                     }
                 }
                 Spacer(Modifier.height(6.dp))
-                Text(
-                    "Presets nudge tone/clarity without killing auto vibe. You can still override below.",
-                    style = MaterialTheme.typography.bodySmall
-                )
+                Text("Presets steer the vibe. Controls below override if you change them.", style = MaterialTheme.typography.bodySmall)
             }
 
             item { Divider() }
 
             item {
-                Text("Auto vibe controls (leave as auto if you want it to “feel out” the vibe)", style = MaterialTheme.typography.titleMedium)
+                Text("Controls", style = MaterialTheme.typography.titleMedium)
+                Text("Everything defaults to Auto. Only touch what you want to force.", style = MaterialTheme.typography.bodySmall)
             }
 
-            item { AutoField("variants (1–6)", s.variants.toString()) { vm.setVariants(it.toIntOrNull() ?: 3) } }
-            item { AutoField("vibe", s.vibe, vm::setVibe) }
-            item { AutoField("tone", s.tone, vm::setTone) }
-            item { AutoField("writingStyle", s.writingStyle, vm::setWritingStyle) }
-            item { AutoField("textQuality", s.textQuality, vm::setTextQuality) }
-            item { AutoField("emojiLevel", s.emojiLevel, vm::setEmojiLevel) }
-            item { AutoField("spiceLevel", s.spiceLevel, vm::setSpiceLevel) }
-            item { AutoField("age", s.age, vm::setAge) }
-            item { AutoField("punctuationPreference", s.punctuationPreference, vm::setPunctuationPreference) }
+            item {
+                SettingDropdown(
+                    label = "Variants",
+                    value = s.variants.toString(),
+                    options = listOf("1","2","3","4","5","6")
+                ) { vm.setVariants(it.toInt()) }
+            }
+
+            item {
+                SettingDropdown(
+                    label = "Vibe",
+                    value = s.vibe,
+                    options = listOf("auto","friendly","playful","serious","flirty","supportive","confident","neutral")
+                ) { vm.setVibe(it) }
+            }
+
+            item {
+                SettingDropdown(
+                    label = "Tone",
+                    value = s.tone,
+                    options = listOf("auto","casual","playful","serious","flirty","supportive","confident","neutral")
+                ) { vm.setTone(it) }
+            }
+
+            item {
+                SettingDropdown(
+                    label = "Writing style",
+                    value = s.writingStyle,
+                    options = listOf("auto","clean","casual","loose","messy")
+                ) { vm.setWritingStyle(it) }
+            }
+
+            item {
+                SettingDropdown(
+                    label = "Text quality",
+                    value = s.textQuality,
+                    options = listOf("auto","perfect","normal","mediocre","rough")
+                ) { vm.setTextQuality(it) }
+            }
+
+            item {
+                SettingDropdown(
+                    label = "Emoji level",
+                    value = s.emojiLevel,
+                    options = listOf("auto","0","1","2","3")
+                ) { vm.setEmojiLevel(it) }
+            }
+
+            item {
+                SettingDropdown(
+                    label = "Punctuation",
+                    value = s.punctuationPreference,
+                    options = listOf("auto","none","light","normal","proper")
+                ) { vm.setPunctuationPreference(it) }
+            }
+
+            item {
+                SettingDropdown(
+                    label = "Spice level",
+                    value = s.spiceLevel,
+                    options = listOf("auto","0","1","2","3")
+                ) { vm.setSpiceLevel(it) }
+            }
+
+            item {
+                SettingDropdown(
+                    label = "Age",
+                    value = s.age,
+                    options = listOf("auto","15","18","21","25","30","35","40","45")
+                ) { vm.setAge(it) }
+            }
 
             item {
                 Button(
@@ -156,10 +253,7 @@ fun ComposeScreen(vm: AppViewModel, paddingValues: PaddingValues) {
             if (s.replies.isNotEmpty()) {
                 item {
                     Text("Replies", style = MaterialTheme.typography.titleMedium)
-                    Text(
-                        "Tap Copy or Share. Everything is auto-saved to History.",
-                        style = MaterialTheme.typography.bodySmall
-                    )
+                    Text("Tap Copy or Share. Runs auto-save to History.", style = MaterialTheme.typography.bodySmall)
                 }
 
                 itemsIndexed(s.replies) { idx, reply ->
@@ -200,7 +294,6 @@ private fun TurnEditor(
                     onClick = { onFromChange("me") },
                     label = { Text("Me") }
                 )
-
                 Spacer(Modifier.weight(1f))
                 TextButton(onClick = onRemove) { Text("Remove") }
             }
@@ -217,15 +310,46 @@ private fun TurnEditor(
     }
 }
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun AutoField(label: String, value: String, onChange: (String) -> Unit) {
-    OutlinedTextField(
-        value = value,
-        onValueChange = onChange,
-        modifier = Modifier.fillMaxWidth(),
-        label = { Text(label) },
-        placeholder = { Text("auto", fontSize = 12.sp) }
-    )
+private fun SettingDropdown(
+    label: String,
+    value: String,
+    options: List<String>,
+    onSelect: (String) -> Unit
+) {
+    var expanded by remember { mutableStateOf(false) }
+
+    ExposedDropdownMenuBox(
+        expanded = expanded,
+        onExpandedChange = { expanded = !expanded }
+    ) {
+        OutlinedTextField(
+            modifier = Modifier
+                .fillMaxWidth()
+                .menuAnchor(),
+            readOnly = true,
+            value = value,
+            onValueChange = {},
+            label = { Text(label) },
+            trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = expanded) }
+        )
+
+        ExposedDropdownMenu(
+            expanded = expanded,
+            onDismissRequest = { expanded = false }
+        ) {
+            options.forEach { opt ->
+                DropdownMenuItem(
+                    text = { Text(opt) },
+                    onClick = {
+                        onSelect(opt)
+                        expanded = false
+                    }
+                )
+            }
+        }
+    }
 }
 
 @Composable
