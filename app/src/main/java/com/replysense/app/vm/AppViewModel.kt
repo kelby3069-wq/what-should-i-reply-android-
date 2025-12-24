@@ -8,6 +8,7 @@ import com.replysense.app.net.ConversationTurn
 import com.replysense.app.net.ReplyRequest
 import com.replysense.app.net.ReplyResponse
 import com.replysense.app.repo.ReplyRepository
+import com.replysense.app.util.ConversationParser
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -30,7 +31,7 @@ data class UiState(
     // conversation thread
     val turns: List<ConversationTurn> = listOf(ConversationTurn("them", "")),
 
-    // auto vibe controls
+    // controls (strings; include "auto" as an option)
     val vibe: String = "auto",
     val tone: String = "auto",
     val writingStyle: String = "auto",
@@ -77,21 +78,20 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     fun applyIncomingTextOnce(text: String) {
         if (incomingApplied) return
         incomingApplied = true
-        _state.update { it.copy(turns = listOf(ConversationTurn("them", text.trim()))) }
+        applyIncomingTextForce(text)
     }
 
-    fun setFavoritesOnly(v: Boolean) {
-        _state.update { it.copy(favoritesOnly = v) }
-        // history flow already updates; quick local filter is fine too
-        viewModelScope.launch {
-            repo.observeHistory().collect { list ->
-                _state.update { s ->
-                    val visible = if (v) list.filter { it.isFavorite } else list
-                    s.copy(history = visible)
-                }
-            }
-        }
+    fun applyIncomingTextForce(text: String) {
+        val parsed = ConversationParser.parse(text)
+        _state.update { it.copy(tab = 0, turns = parsed) }
     }
+
+    fun smartExtract(rawBlock: String) {
+        val parsed = ConversationParser.parse(rawBlock)
+        _state.update { it.copy(turns = parsed, error = null) }
+    }
+
+    fun setFavoritesOnly(v: Boolean) = _state.update { it.copy(favoritesOnly = v) }
 
     fun setVariants(v: Int) = _state.update { it.copy(variants = v.coerceIn(1, 6)) }
 
@@ -105,23 +105,25 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     fun setPunctuationPreference(v: String) = _state.update { it.copy(punctuationPreference = v) }
 
     fun setPreset(p: Preset) {
-        // Presets nudge style without killing auto-vibe.
-        // You can still leave most fields "auto" and let worker infer.
         _state.update { s ->
-            val (tone, writingStyle, textQuality, emojiLevel) = when (p) {
-                Preset.DEFAULT -> listOf("auto", "auto", "auto", "auto")
-                Preset.FLIRTY -> listOf("playful", "casual", "auto", "auto")
-                Preset.SERIOUS -> listOf("serious", "clean", "high", "low")
-                Preset.APOLOGY -> listOf("apologetic", "clean", "high", "low")
-                Preset.CONFIDENT -> listOf("confident", "clean", "high", "low")
-                Preset.SHORT -> listOf("auto", "auto", "auto", "auto")
+            // Presets *steer* without nuking auto vibe. All values remain valid tokens.
+            val (tone, writingStyle, textQuality, emojiLevel, spiceLevel) = when (p) {
+                Preset.DEFAULT -> listOf("auto", "auto", "auto", "auto", "auto")
+                Preset.FLIRTY -> listOf("playful", "casual", "auto", "auto", s.spiceLevel) // user controls spice separately
+                Preset.SERIOUS -> listOf("serious", "clean", "perfect", "0", "0")
+                Preset.APOLOGY -> listOf("supportive", "clean", "perfect", "0", "0")
+                Preset.CONFIDENT -> listOf("confident", "clean", "perfect", "0", "0")
+                Preset.SHORT -> listOf("auto", "auto", "auto", "auto", "auto")
             }
+
             s.copy(
                 preset = p,
                 tone = tone,
                 writingStyle = writingStyle,
                 textQuality = textQuality,
-                emojiLevel = emojiLevel
+                emojiLevel = emojiLevel,
+                // if preset is serious/apology/confident, force spice off
+                spiceLevel = spiceLevel
             )
         }
     }
@@ -154,28 +156,6 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         _state.value = UiState()
     }
 
-    fun loadHistoryItem(entity: ReplyHistoryEntity, decoded: DecodedHistory) {
-        _state.update {
-            it.copy(
-                tab = 0,
-                turns = decoded.conversation,
-                variants = decoded.request.variants,
-                vibe = decoded.request.vibe,
-                tone = decoded.request.tone,
-                writingStyle = decoded.request.writingStyle,
-                textQuality = decoded.request.textQuality,
-                emojiLevel = decoded.request.emojiLevel,
-                spiceLevel = decoded.request.spiceLevel,
-                age = decoded.request.age,
-                punctuationPreference = decoded.request.punctuationPreference,
-                detectedNotes = decoded.response.result?.vibe?.notes,
-                replies = decoded.response.result?.replies.orEmpty(),
-                lastSavedId = entity.id,
-                error = null
-            )
-        }
-    }
-
     fun toggleFavorite(entity: ReplyHistoryEntity) {
         viewModelScope.launch { repo.toggleFavorite(entity) }
     }
@@ -186,7 +166,9 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
 
     fun generate() {
         val s = _state.value
-        val cleaned = s.turns.map { it.copy(text = it.text.trim()) }.filter { it.text.isNotBlank() }
+        val cleaned = s.turns
+            .map { it.copy(text = it.text.trim()) }
+            .filter { it.text.isNotBlank() }
 
         if (cleaned.isEmpty()) {
             _state.update { it.copy(error = "Add at least one message in the thread.") }
@@ -197,7 +179,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
             conversation = cleaned,
             variants = s.variants,
             vibe = s.vibe,
-            tone = if (s.preset == Preset.SHORT) "auto" else s.tone,
+            tone = s.tone,
             writingStyle = s.writingStyle,
             textQuality = s.textQuality,
             emojiLevel = s.emojiLevel,
@@ -212,9 +194,8 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
             val res = repo.generateAndSave(payload)
             res.fold(
                 onSuccess = { (response, id) ->
-                    val replies = when (s.preset) {
-                        Preset.SHORT -> response.result?.replies.orEmpty().map { shorten(it) }
-                        else -> response.result?.replies.orEmpty()
+                    val replies = response.result?.replies.orEmpty().let { list ->
+                        if (s.preset == Preset.SHORT) list.map { shorten(it) } else list
                     }
                     val notes = response.result?.vibe?.notes
                     _state.update { it.copy(isLoading = false, replies = replies, detectedNotes = notes, lastSavedId = id) }
@@ -227,9 +208,8 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     private fun shorten(x: String): String {
-        // not “AI summary”, just trims to a tight text vibe
-        val s = x.trim().replace(Regex("\\s+"), " ")
-        return if (s.length <= 120) s else s.take(117).trimEnd() + "…"
+        val t = x.trim().replace(Regex("\\s+"), " ")
+        return if (t.length <= 120) t else t.take(117).trimEnd() + "…"
     }
 }
 
