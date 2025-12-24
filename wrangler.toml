@@ -1,6 +1,3 @@
 name = "reply-sense"
-main = "src/worker.js"
+main = "worker.js"
 compatibility_date = "2025-01-01"
-
-# Optional: only if you use KV/R2 later
-# kv_namespaces = [{ binding = "KV", id = "xxxx" }]
