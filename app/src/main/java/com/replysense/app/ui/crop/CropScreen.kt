@@ -8,8 +8,8 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.unit.dp
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun CropScreen(
     bitmap: Bitmap,
@@ -32,14 +32,10 @@ fun CropScreen(
             CenterAlignedTopAppBar(
                 title = { Text("Crop") },
                 navigationIcon = {
-                    IconButton(onClick = onCancel) {
-                        Icon(Icons.Default.Close, contentDescription = "Cancel")
-                    }
+                    TextButton(onClick = onCancel) { Text("Cancel") }
                 },
                 actions = {
-                    TextButton(onClick = { onConfirm(bitmap) }) {
-                        Text("Done")
-                    }
+                    TextButton(onClick = { onConfirm(bitmap) }) { Text("Done") }
                 }
             )
         }
