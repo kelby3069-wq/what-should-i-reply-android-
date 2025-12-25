@@ -1,7 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
-    <!-- Needed for calling your Cloudflare Worker -->
     <uses-permission android:name="android.permission.INTERNET" />
 
     <application
@@ -13,7 +12,7 @@
         android:theme="@style/Theme.ReplySense">
 
         <activity
-            android:name=".MainActivity"
+            android:name="com.replysense.app.MainActivity"
             android:exported="true"
             android:launchMode="singleTop">
             <intent-filter>
