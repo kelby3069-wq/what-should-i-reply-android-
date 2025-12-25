@@ -1,8 +1,6 @@
 plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.android")
-
-    // Required for Compose with Kotlin 2.x
     id("org.jetbrains.kotlin.plugin.compose")
 }
 
@@ -40,43 +38,33 @@ android {
 }
 
 dependencies {
-
-    /* --------------------
-       Core Android
-       -------------------- */
+    // Core
     implementation("androidx.core:core-ktx:1.13.1")
     implementation("androidx.activity:activity-compose:1.9.3")
     implementation("androidx.lifecycle:lifecycle-runtime-ktx:2.8.7")
     implementation("androidx.lifecycle:lifecycle-runtime-compose:2.8.7")
 
-    /* --------------------
-       Compose BOM
-       -------------------- */
+    // ✅ REQUIRED: provides Theme.MaterialComponents.* XML themes
+    implementation("com.google.android.material:material:1.12.0")
+
+    // Compose BOM
     implementation(platform("androidx.compose:compose-bom:2024.10.00"))
     androidTestImplementation(platform("androidx.compose:compose-bom:2024.10.00"))
 
-    /* --------------------
-       Compose UI
-       -------------------- */
+    // Compose UI
     implementation("androidx.compose.ui:ui")
     implementation("androidx.compose.ui:ui-graphics")
     implementation("androidx.compose.ui:ui-tooling-preview")
     debugImplementation("androidx.compose.ui:ui-tooling")
     debugImplementation("androidx.compose.ui:ui-test-manifest")
 
-    /* --------------------
-       Material 3 (Compose)
-       -------------------- */
+    // Material 3 (Compose UI)
     implementation("androidx.compose.material3:material3")
     implementation("androidx.compose.material3:material3-android")
 
-    /* --------------------
-       Kotlin Serialization (runtime ONLY)
-       -------------------- */
+    // Kotlin Serialization (runtime only)
     implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.6.3")
 
-    /* --------------------
-       ML Kit – OCR
-       -------------------- */
+    // ML Kit – OCR
     implementation("com.google.mlkit:text-recognition:16.0.1")
 }
