@@ -1,33 +1,45 @@
 plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.android")
-    id("org.jetbrains.kotlin.plugin.compose")
 }
 
 android {
     namespace = "com.replysense.app"
-    compileSdk = 35
+    compileSdk = 34
 
     defaultConfig {
         applicationId = "com.replysense.app"
         minSdk = 24
-        targetSdk = 35
+        targetSdk = 34
         versionCode = 1
         versionName = "1.0"
     }
 
-    buildFeatures {
-        compose = true
-        buildConfig = true
+    buildTypes {
+        release {
+            isMinifyEnabled = false
+            proguardFiles(
+                getDefaultProguardFile("proguard-android-optimize.txt"),
+                "proguard-rules.pro"
+            )
+        }
+    }
+
+    compileOptions {
+        sourceCompatibility = JavaVersion.VERSION_17
+        targetCompatibility = JavaVersion.VERSION_17
     }
 
     kotlinOptions {
         jvmTarget = "17"
     }
 
-    compileOptions {
-        sourceCompatibility = JavaVersion.VERSION_17
-        targetCompatibility = JavaVersion.VERSION_17
+    buildFeatures {
+        compose = true
+    }
+
+    composeOptions {
+        kotlinCompilerExtensionVersion = "1.5.15"
     }
 
     packaging {
@@ -38,33 +50,35 @@ android {
 }
 
 dependencies {
-    // Core
+
+    /* ---------------- CORE ANDROID ---------------- */
     implementation("androidx.core:core-ktx:1.13.1")
     implementation("androidx.activity:activity-compose:1.9.3")
     implementation("androidx.lifecycle:lifecycle-runtime-ktx:2.8.7")
-    implementation("androidx.lifecycle:lifecycle-runtime-compose:2.8.7")
 
-    // ✅ REQUIRED: provides Theme.MaterialComponents.* XML themes
-    implementation("com.google.android.material:material:1.12.0")
-
-    // Compose BOM
+    /* ---------------- COMPOSE BOM ---------------- */
     implementation(platform("androidx.compose:compose-bom:2024.10.00"))
-    androidTestImplementation(platform("androidx.compose:compose-bom:2024.10.00"))
 
-    // Compose UI
+    /* ---------------- COMPOSE UI ---------------- */
     implementation("androidx.compose.ui:ui")
     implementation("androidx.compose.ui:ui-graphics")
     implementation("androidx.compose.ui:ui-tooling-preview")
     debugImplementation("androidx.compose.ui:ui-tooling")
-    debugImplementation("androidx.compose.ui:ui-test-manifest")
 
-    // Material 3 (Compose UI)
+    /* ---------------- MATERIAL 3 ---------------- */
     implementation("androidx.compose.material3:material3")
-    implementation("androidx.compose.material3:material3-android")
 
-    // Kotlin Serialization (runtime only)
-    implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.6.3")
+    /* ---------------- ICONS (THIS FIXES `Icons`) ---------------- */
+    implementation("androidx.compose.material:material-icons-core")
+    implementation("androidx.compose.material:material-icons-extended")
 
-    // ML Kit – OCR
+    /* ---------------- IMAGE + BITMAP SUPPORT ---------------- */
+    implementation("androidx.compose.foundation:foundation")
+    implementation("androidx.compose.foundation:foundation-layout")
+
+    /* ---------------- HAPTICS ---------------- */
+    implementation("androidx.compose.ui:ui-util")
+
+    /* ---------------- ML KIT (YOU ALREADY USE THIS) ---------------- */
     implementation("com.google.mlkit:text-recognition:16.0.1")
 }
