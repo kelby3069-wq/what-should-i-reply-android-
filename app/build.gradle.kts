@@ -24,9 +24,7 @@ android {
                 "proguard-rules.pro"
             )
         }
-        debug {
-            isMinifyEnabled = false
-        }
+        debug { isMinifyEnabled = false }
     }
 
     compileOptions {
@@ -34,13 +32,9 @@ android {
         targetCompatibility = JavaVersion.VERSION_17
     }
 
-    kotlin {
-        jvmToolchain(17)
-    }
+    kotlin { jvmToolchain(17) }
 
-    buildFeatures {
-        compose = true
-    }
+    buildFeatures { compose = true }
 
     packaging {
         resources {
@@ -57,6 +51,7 @@ android {
 }
 
 dependencies {
+    // Compose BOM
     implementation(platform("androidx.compose:compose-bom:2025.12.00"))
     androidTestImplementation(platform("androidx.compose:compose-bom:2025.12.00"))
 
@@ -70,6 +65,9 @@ dependencies {
     debugImplementation("androidx.compose.ui:ui-tooling")
     debugImplementation("androidx.compose.ui:ui-test-manifest")
 
-    // ML Kit OCR (Text Recognition)
+    // ✅ REQUIRED for XML Theme.Material3.* parents (AAPT resource linking)
+    implementation("com.google.android.material:material:1.13.0")
+
+    // ML Kit OCR
     implementation("com.google.mlkit:text-recognition:16.0.1")
 }
