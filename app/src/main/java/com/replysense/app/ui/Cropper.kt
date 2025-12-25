@@ -37,7 +37,7 @@ fun CropperDialog(
         title = { Text(title) },
         text = {
             Column {
-                Text("Drag box to chat area. Drag corners to resize.")
+                Text("Drag the box to chat area. Drag corners to resize.")
                 Spacer(Modifier.height(10.dp))
                 Box(
                     Modifier
@@ -95,8 +95,9 @@ private fun CropCanvas(
                 detectDragGestures { change, drag ->
                     change.consume()
 
-                    val w = size.width.min1f()
-                    val h = size.height.min1f()
+                    // 👇 IntSize → Float explicitly
+                    val w = size.width.toFloat().coerceAtLeast(1f)
+                    val h = size.height.toFloat().coerceAtLeast(1f)
 
                     val left = leftN * w
                     val top = topN * h
@@ -106,7 +107,7 @@ private fun CropCanvas(
                     val p = change.position
                     val nearTL = dist(p, Offset(left, top)) <= hitRadius
                     val nearBR = dist(p, Offset(right, bottom)) <= hitRadius
-                    val inside = p.x >= left && p.x <= right && p.y >= top && p.y <= bottom
+                    val inside = p.x in left..right && p.y in top..bottom
 
                     var nl = left
                     var nt = top
@@ -123,8 +124,8 @@ private fun CropCanvas(
                             nb = (bottom + drag.y).coerceIn(top + minSizePx, h)
                         }
                         inside -> {
-                            val rw = (right - left).min1f().coerceAtLeast(minSizePx)
-                            val rh = (bottom - top).min1f().coerceAtLeast(minSizePx)
+                            val rw = (right - left).coerceAtLeast(minSizePx)
+                            val rh = (bottom - top).coerceAtLeast(minSizePx)
 
                             nl = (left + drag.x).coerceIn(0f, w - rw)
                             nt = (top + drag.y).coerceIn(0f, h - rh)
@@ -143,24 +144,22 @@ private fun CropCanvas(
                 }
             }
     ) {
-        // ✅ safest overload: no Int params
+        // DrawScope size = Float ✔
         drawImage(image)
 
-        val w = size.width.min1f()
-        val h = size.height.min1f()
+        val w = size.width.coerceAtLeast(1f)
+        val h = size.height.coerceAtLeast(1f)
 
         val left = leftN * w
         val top = topN * h
         val right = rightN * w
         val bottom = bottomN * h
 
-        // Dim outside
         drawRect(Color(0x88000000), size = size)
 
-        val rectW = (right - left).min1f()
-        val rectH = (bottom - top).min1f()
+        val rectW = (right - left).coerceAtLeast(1f)
+        val rectH = (bottom - top).coerceAtLeast(1f)
 
-        // Clear crop area
         drawRect(
             color = Color.Transparent,
             topLeft = Offset(left, top),
@@ -168,23 +167,17 @@ private fun CropCanvas(
             blendMode = BlendMode.Clear
         )
 
-        // Border
         drawRect(
             color = Color.White,
             topLeft = Offset(left, top),
             size = Size(rectW, rectH),
-            style = Stroke(width = borderWidth)
+            style = Stroke(borderWidth)
         )
 
-        // Handles
-        drawCircle(Color.White, radius = handleRadius, center = Offset(left, top))
-        drawCircle(Color.White, radius = handleRadius, center = Offset(right, bottom))
+        drawCircle(Color.White, handleRadius, Offset(left, top))
+        drawCircle(Color.White, handleRadius, Offset(right, bottom))
     }
 }
 
-/** Manhattan-ish distance (fast, fine for hit testing). */
 private fun dist(a: Offset, b: Offset): Float =
     abs(a.x - b.x) + abs(a.y - b.y)
-
-/** Float-only “at least 1f” helper to avoid Int overload traps. */
-private fun Float.min1f(): Float = if (this < 1f) 1f else this
