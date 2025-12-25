@@ -7,10 +7,11 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.sp
 
 /**
- * Premium, restrained typography.
- * System sans for now (safe + clean).
+ * Premium hierarchy:
+ * - Bigger headlines, calm body sizes
+ * - Slightly stronger titles
+ * - System Sans for now (we can drop Inter later)
  */
-
 private val AppFont = FontFamily.SansSerif
 
 val AppTypography = Typography(
@@ -26,11 +27,23 @@ val AppTypography = Typography(
         fontSize = 24.sp,
         lineHeight = 30.sp
     ),
-    titleLarge = TextStyle(
+    headlineSmall = TextStyle(
         fontFamily = AppFont,
-        fontWeight = FontWeight.Medium,
+        fontWeight = FontWeight.SemiBold,
         fontSize = 20.sp,
         lineHeight = 26.sp
+    ),
+    titleLarge = TextStyle(
+        fontFamily = AppFont,
+        fontWeight = FontWeight.SemiBold,
+        fontSize = 18.sp,
+        lineHeight = 24.sp
+    ),
+    titleMedium = TextStyle(
+        fontFamily = AppFont,
+        fontWeight = FontWeight.Medium,
+        fontSize = 16.sp,
+        lineHeight = 22.sp
     ),
     bodyLarge = TextStyle(
         fontFamily = AppFont,
@@ -44,10 +57,22 @@ val AppTypography = Typography(
         fontSize = 14.sp,
         lineHeight = 22.sp
     ),
+    bodySmall = TextStyle(
+        fontFamily = AppFont,
+        fontWeight = FontWeight.Normal,
+        fontSize = 12.sp,
+        lineHeight = 18.sp
+    ),
     labelLarge = TextStyle(
         fontFamily = AppFont,
-        fontWeight = FontWeight.Medium,
+        fontWeight = FontWeight.SemiBold,
         fontSize = 14.sp,
         lineHeight = 18.sp
+    ),
+    labelMedium = TextStyle(
+        fontFamily = AppFont,
+        fontWeight = FontWeight.Medium,
+        fontSize = 12.sp,
+        lineHeight = 16.sp
     )
 )
