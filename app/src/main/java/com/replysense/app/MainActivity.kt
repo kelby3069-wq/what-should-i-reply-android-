@@ -8,15 +8,26 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.ContentCopy
+import androidx.compose.material.icons.filled.Image
+import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.Send
+import androidx.compose.material.icons.filled.Share
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.google.mlkit.vision.common.InputImage
 import com.google.mlkit.vision.text.TextRecognition
@@ -35,11 +46,18 @@ class MainActivity : ComponentActivity() {
 private const val PREFS = "replysense_prefs"
 private const val KEY_MY_SIDE = "my_side" // "RIGHT" | "LEFT"
 
+private enum class Tone(val label: String, val emoji: String) {
+    CHILL("Chill", "😌"),
+    FLIRTY("Flirty", "😏"),
+    FIRM("Firm", "🧊")
+}
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun ReplySenseApp() {
     val ctx = LocalContext.current
 
+    // Core state
     var pickedBitmap by remember { mutableStateOf<Bitmap?>(null) }
     var showCrop by remember { mutableStateOf(false) }
 
@@ -53,8 +71,11 @@ private fun ReplySenseApp() {
     var transcript by remember { mutableStateOf("") }
     var json by remember { mutableStateOf("") }
 
-    // persisted “my side”
     var mySide by remember { mutableStateOf(loadMySide(ctx)) }
+
+    // UI state
+    var showDebug by remember { mutableStateOf(false) }
+    var isBusy by remember { mutableStateOf(false) }
 
     val pickImageLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.GetContent()
@@ -80,6 +101,7 @@ private fun ReplySenseApp() {
     }
 
     fun runOcr(bitmap: Bitmap) {
+        isBusy = true
         val image = InputImage.fromBitmap(bitmap, 0)
         val recognizer = TextRecognition.getClient(TextRecognizerOptions.DEFAULT_OPTIONS)
 
@@ -106,6 +128,7 @@ private fun ReplySenseApp() {
                 generatedReply = ""
                 recomputeTargets()
                 rebuildDebug()
+                isBusy = false
             }
             .addOnFailureListener { e ->
                 rawText = "OCR error: ${e.message ?: e.javaClass.simpleName}"
@@ -115,6 +138,7 @@ private fun ReplySenseApp() {
                 transcript = ""
                 json = ""
                 generatedReply = ""
+                isBusy = false
             }
     }
 
@@ -143,11 +167,23 @@ private fun ReplySenseApp() {
         generatedReply = LocalReplyEngine.generate(src, tone)
     }
 
-    MaterialTheme {
+    MaterialTheme(
+        colorScheme = lightColorScheme(), // keep simple; we’ll theme next pass
+        typography = Typography()
+    ) {
         Scaffold(
             topBar = {
-                TopAppBar(
-                    title = { Text("ReplySense OCR") },
+                CenterAlignedTopAppBar(
+                    title = {
+                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                            Text("ReplySense", fontWeight = FontWeight.SemiBold)
+                            Text(
+                                "OCR → Clean thread → Smart reply",
+                                style = MaterialTheme.typography.labelMedium,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                    },
                     actions = {
                         AssistChip(
                             onClick = {
@@ -157,112 +193,219 @@ private fun ReplySenseApp() {
                             },
                             label = { Text("My side: ${mySide.name}") }
                         )
-                        Spacer(Modifier.width(12.dp))
+                        Spacer(Modifier.width(8.dp))
+                        IconButton(onClick = { showDebug = !showDebug }) {
+                            Text(if (showDebug) "Hide" else "Debug", style = MaterialTheme.typography.labelLarge)
+                        }
                     }
                 )
             }
         ) { pad ->
             Column(
-                Modifier
+                modifier = Modifier
                     .padding(pad)
-                    .padding(16.dp)
+                    .fillMaxSize()
                     .verticalScroll(rememberScrollState())
+                    .padding(16.dp),
+                verticalArrangement = Arrangement.spacedBy(14.dp)
             ) {
-                Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                    Button(onClick = { pickImageLauncher.launch("image/*") }) { Text("Pick image") }
-                    Button(
-                        onClick = { pickedBitmap?.let { runOcr(it) } },
-                        enabled = pickedBitmap != null
-                    ) { Text("Run OCR") }
-                }
+                // HERO CARD
+                ElevatedCard(
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(20.dp)
+                ) {
+                    Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Column(Modifier.weight(1f)) {
+                                Text("Start here", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+                                Text(
+                                    "Pick a screenshot, crop to the chat area, run OCR.",
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                            if (isBusy) {
+                                CircularProgressIndicator(modifier = Modifier.size(22.dp), strokeWidth = 2.dp)
+                            }
+                        }
 
-                Spacer(Modifier.height(12.dp))
-                ToneRow(tone = tone, onTone = { tone = it })
-                Spacer(Modifier.height(12.dp))
+                        Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                            Button(
+                                onClick = { pickImageLauncher.launch("image/*") },
+                                modifier = Modifier.weight(1f),
+                                shape = RoundedCornerShape(14.dp)
+                            ) {
+                                Icon(Icons.Filled.Image, contentDescription = null)
+                                Spacer(Modifier.width(8.dp))
+                                Text("Pick")
+                            }
 
-                if (messages.isNotEmpty()) {
-                    val targetPreview = targetTextPreferThem()
-                        ?.take(80)
-                        ?.let { if (it.length == 80) "$it…" else it } ?: "—"
-                    ElevatedCard(Modifier.fillMaxWidth()) {
-                        Column(Modifier.padding(12.dp)) {
-                            Text("Reply target (auto)", fontWeight = FontWeight.SemiBold)
-                            Spacer(Modifier.height(6.dp))
-                            Text(targetPreview)
-                            Spacer(Modifier.height(10.dp))
-                            Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                                Button(
-                                    onClick = { selectedMsgId = lastThemId ?: selectedMsgId },
-                                    enabled = lastThemId != null
-                                ) { Text("Select last THEM") }
-
-                                OutlinedButton(onClick = { generateReply() }) { Text("Reply now") }
+                            FilledTonalButton(
+                                onClick = { pickedBitmap?.let { runOcr(it) } },
+                                enabled = pickedBitmap != null && !isBusy,
+                                modifier = Modifier.weight(1f),
+                                shape = RoundedCornerShape(14.dp)
+                            ) {
+                                Icon(Icons.Filled.PlayArrow, contentDescription = null)
+                                Spacer(Modifier.width(8.dp))
+                                Text("Run OCR")
                             }
                         }
                     }
                 }
 
-                Spacer(Modifier.height(16.dp))
+                // TONE SELECTOR
+                ElevatedCard(shape = RoundedCornerShape(20.dp)) {
+                    Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                        Text("Tone", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
+                        SegmentedTone(
+                            tone = tone,
+                            onTone = { tone = it }
+                        )
+                    }
+                }
 
-                Text("Messages (tap one)", fontWeight = FontWeight.SemiBold)
-                Spacer(Modifier.height(8.dp))
+                // TARGET + ACTIONS
+                ElevatedCard(shape = RoundedCornerShape(20.dp)) {
+                    Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                        Text("Reply target", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
 
-                if (messages.isEmpty()) {
-                    Text("No messages yet. Pick an image → crop → Run OCR.")
-                } else {
-                    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                        messages.forEach { m ->
-                            MessageCard(
-                                msg = m,
-                                selected = (m.id == selectedMsgId),
-                                isTarget = (m.id == lastThemId),
-                                onSelect = { selectedMsgId = m.id },
-                                onToggleDir = { toggleDir(m.id) }
+                        val targetPreview = targetTextPreferThem()?.trim().orEmpty()
+                        Surface(
+                            shape = RoundedCornerShape(14.dp),
+                            color = MaterialTheme.colorScheme.surfaceVariant
+                        ) {
+                            Text(
+                                text = if (targetPreview.isBlank()) "No target yet — run OCR first." else targetPreview,
+                                modifier = Modifier.padding(12.dp),
+                                maxLines = 3,
+                                overflow = TextOverflow.Ellipsis
                             )
+                        }
+
+                        Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                            FilledTonalButton(
+                                onClick = { selectedMsgId = lastThemId ?: selectedMsgId },
+                                enabled = lastThemId != null,
+                                shape = RoundedCornerShape(14.dp)
+                            ) { Text("Select last THEM") }
+
+                            Button(
+                                onClick = { generateReply() },
+                                enabled = messages.isNotEmpty(),
+                                shape = RoundedCornerShape(14.dp)
+                            ) {
+                                Icon(Icons.Filled.Send, contentDescription = null)
+                                Spacer(Modifier.width(8.dp))
+                                Text("Generate")
+                            }
                         }
                     }
                 }
 
-                Spacer(Modifier.height(16.dp))
+                // MESSAGES LIST
+                ElevatedCard(shape = RoundedCornerShape(20.dp)) {
+                    Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                        Text("Messages", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
+                        Text(
+                            "Tap to select. Tap the chip to flip ME/THEM if OCR guessed wrong.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
 
-                Button(onClick = { generateReply() }, enabled = messages.isNotEmpty()) {
-                    Text("Generate reply")
+                        if (messages.isEmpty()) {
+                            Surface(
+                                shape = RoundedCornerShape(14.dp),
+                                color = MaterialTheme.colorScheme.surfaceVariant
+                            ) {
+                                Text("No messages yet.", modifier = Modifier.padding(12.dp))
+                            }
+                        } else {
+                            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                                messages.forEach { m ->
+                                    PremiumMessageCard(
+                                        msg = m,
+                                        selected = (m.id == selectedMsgId),
+                                        isTarget = (m.id == lastThemId),
+                                        onSelect = { selectedMsgId = m.id },
+                                        onToggleDir = { toggleDir(m.id) }
+                                    )
+                                }
+                            }
+                        }
+                    }
                 }
 
-                Spacer(Modifier.height(16.dp))
+                // GENERATED REPLY
+                ElevatedCard(shape = RoundedCornerShape(20.dp)) {
+                    Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                        Text("Generated reply", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
 
-                Text("Generated reply", fontWeight = FontWeight.SemiBold)
-                Spacer(Modifier.height(8.dp))
-                ElevatedCard(Modifier.fillMaxWidth()) {
-                    Text(
-                        text = if (generatedReply.isBlank()) "—" else generatedReply,
-                        modifier = Modifier.padding(14.dp)
-                    )
+                        Surface(
+                            shape = RoundedCornerShape(16.dp),
+                            color = MaterialTheme.colorScheme.surfaceVariant
+                        ) {
+                            Text(
+                                text = if (generatedReply.isBlank()) "—" else generatedReply,
+                                modifier = Modifier.padding(14.dp)
+                            )
+                        }
+
+                        Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                            FilledTonalButton(
+                                onClick = { copyToClipboard(ctx, "ReplySense Reply", generatedReply) },
+                                enabled = generatedReply.isNotBlank(),
+                                shape = RoundedCornerShape(14.dp)
+                            ) {
+                                Icon(Icons.Filled.ContentCopy, contentDescription = null)
+                                Spacer(Modifier.width(8.dp))
+                                Text("Copy")
+                            }
+
+                            OutlinedButton(
+                                onClick = { shareText(ctx, "ReplySense Reply", generatedReply) },
+                                enabled = generatedReply.isNotBlank(),
+                                shape = RoundedCornerShape(14.dp)
+                            ) {
+                                Icon(Icons.Filled.Share, contentDescription = null)
+                                Spacer(Modifier.width(8.dp))
+                                Text("Share")
+                            }
+                        }
+                    }
                 }
 
-                Spacer(Modifier.height(16.dp))
+                // DEBUG (collapsible)
+                AnimatedVisibility(visible = showDebug) {
+                    ElevatedCard(shape = RoundedCornerShape(20.dp)) {
+                        Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                            Text("Debug", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
+                            Text("Raw: ${rawText.length} | Messages: ${messages.size} | Target: ${lastThemId ?: "—"}")
 
-                Text("Debug", fontWeight = FontWeight.SemiBold)
-                Spacer(Modifier.height(6.dp))
-                Text("Raw: ${rawText.length} | Messages: ${messages.size} | Target: ${lastThemId ?: "—"}")
+                            Surface(shape = RoundedCornerShape(14.dp), color = MaterialTheme.colorScheme.surfaceVariant) {
+                                Column(Modifier.padding(12.dp)) {
+                                    Text("Transcript", fontWeight = FontWeight.SemiBold)
+                                    Spacer(Modifier.height(6.dp))
+                                    Text(if (transcript.isBlank()) "—" else transcript)
+                                }
+                            }
 
-                Spacer(Modifier.height(8.dp))
-                ElevatedCard(Modifier.fillMaxWidth()) {
-                    Column(Modifier.padding(14.dp)) {
-                        Text("Transcript", fontWeight = FontWeight.SemiBold)
-                        Spacer(Modifier.height(6.dp))
-                        Text(if (transcript.isBlank()) "—" else transcript)
+                            Surface(shape = RoundedCornerShape(14.dp), color = MaterialTheme.colorScheme.surfaceVariant) {
+                                Column(Modifier.padding(12.dp)) {
+                                    Text("JSON", fontWeight = FontWeight.SemiBold)
+                                    Spacer(Modifier.height(6.dp))
+                                    Text(if (json.isBlank()) "—" else json)
+                                }
+                            }
+                        }
                     }
                 }
 
                 Spacer(Modifier.height(8.dp))
-                ElevatedCard(Modifier.fillMaxWidth()) {
-                    Column(Modifier.padding(14.dp)) {
-                        Text("JSON", fontWeight = FontWeight.SemiBold)
-                        Spacer(Modifier.height(6.dp))
-                        Text(if (json.isBlank()) "—" else json)
-                    }
-                }
             }
         }
     }
@@ -282,43 +425,57 @@ private fun ReplySenseApp() {
 }
 
 @Composable
-private fun ToneRow(tone: Tone, onTone: (Tone) -> Unit) {
-    Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-        FilterChip(selected = tone == Tone.CHILL, onClick = { onTone(Tone.CHILL) }, label = { Text("Chill") })
-        FilterChip(selected = tone == Tone.FLIRTY, onClick = { onTone(Tone.FLIRTY) }, label = { Text("Flirty") })
-        FilterChip(selected = tone == Tone.FIRM, onClick = { onTone(Tone.FIRM) }, label = { Text("Firm") })
+private fun SegmentedTone(tone: Tone, onTone: (Tone) -> Unit) {
+    val options = Tone.entries
+    SingleChoiceSegmentedButtonRow(modifier = Modifier.fillMaxWidth()) {
+        options.forEachIndexed { index, t ->
+            SegmentedButton(
+                selected = tone == t,
+                onClick = { onTone(t) },
+                shape = SegmentedButtonDefaults.itemShape(index = index, count = options.size)
+            ) {
+                Text("${t.emoji} ${t.label}")
+            }
+        }
     }
 }
 
 @Composable
-private fun MessageCard(
+private fun PremiumMessageCard(
     msg: OcrPostProcess.Msg,
     selected: Boolean,
     isTarget: Boolean,
     onSelect: () -> Unit,
     onToggleDir: () -> Unit
 ) {
-    ElevatedCard(
+    val container = when {
+        isTarget -> MaterialTheme.colorScheme.primaryContainer
+        selected -> MaterialTheme.colorScheme.tertiaryContainer
+        else -> MaterialTheme.colorScheme.surfaceVariant
+    }
+    val label = if (msg.dir == OcrPostProcess.Dir.THEM) "THEM" else "ME"
+
+    Surface(
         modifier = Modifier
             .fillMaxWidth()
-            .clickable { onSelect() }
+            .clickable { onSelect() },
+        shape = RoundedCornerShape(18.dp),
+        color = container
     ) {
-        Column(Modifier.padding(12.dp)) {
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                AssistChip(
-                    onClick = onToggleDir,
-                    label = { Text(if (msg.dir == OcrPostProcess.Dir.THEM) "THEM" else "ME") }
-                )
+        Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                AssistChip(onClick = onToggleDir, label = { Text(label) })
                 if (selected) AssistChip(onClick = {}, label = { Text("Selected") })
                 if (isTarget) AssistChip(onClick = {}, label = { Text("Target") })
             }
-            Spacer(Modifier.height(8.dp))
-            Text(text = msg.text, fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal)
+            Text(
+                text = msg.text,
+                style = MaterialTheme.typography.bodyLarge,
+                fontWeight = if (selected || isTarget) FontWeight.SemiBold else FontWeight.Normal
+            )
         }
     }
 }
-
-private enum class Tone { CHILL, FLIRTY, FIRM }
 
 private object LocalReplyEngine {
     fun generate(input: String, tone: Tone): String {
@@ -362,4 +519,22 @@ private fun saveMySide(ctx: Context, side: OcrLayoutCluster.MySide) {
         .edit()
         .putString(KEY_MY_SIDE, side.name)
         .apply()
+}
+
+/** Clipboard + Share helpers (no extra deps) */
+private fun copyToClipboard(ctx: Context, label: String, text: String) {
+    if (text.isBlank()) return
+    val cm = ctx.getSystemService(Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager
+    cm.setPrimaryClip(android.content.ClipData.newPlainText(label, text))
+}
+
+private fun shareText(ctx: Context, subject: String, text: String) {
+    if (text.isBlank()) return
+    val send = android.content.Intent(android.content.Intent.ACTION_SEND).apply {
+        type = "text/plain"
+        putExtra(android.content.Intent.EXTRA_SUBJECT, subject)
+        putExtra(android.content.Intent.EXTRA_TEXT, text)
+        addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
+    }
+    ctx.startActivity(android.content.Intent.createChooser(send, "Share via").addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK))
 }
