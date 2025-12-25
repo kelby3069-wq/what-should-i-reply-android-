@@ -41,6 +41,8 @@ private fun App() {
     }
 }
 
+private enum class OutputMode { Transcript, Json }
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun OcrScreen() {
@@ -53,10 +55,13 @@ private fun OcrScreen() {
     var rawText by remember { mutableStateOf("") }
     var errorText by remember { mutableStateOf<String?>(null) }
 
-    // ✅ The “3 options”
+    // Options
     var useCrop by remember { mutableStateOf(true) }
     var useClean by remember { mutableStateOf(true) }
     var useMerge by remember { mutableStateOf(true) }
+    var useThread by remember { mutableStateOf(true) }
+
+    var outputMode by remember { mutableStateOf(OutputMode.Transcript) }
 
     // Crop UI state
     var showCropper by remember { mutableStateOf(false) }
@@ -94,16 +99,25 @@ private fun OcrScreen() {
             }
     }
 
-    val processedText = remember(rawText, useClean, useMerge) {
+    val processed = remember(rawText, useClean, useMerge, useThread) {
         val t = rawText.trim()
-        if (t.isEmpty()) "" else OcrPostProcess.process(t, clean = useClean, mergeLines = useMerge)
+        if (t.isEmpty()) return@remember OcrPostProcess.Processed(
+            transcript = "",
+            json = "[]"
+        )
+        OcrPostProcess.processThreadAware(
+            input = t,
+            clean = useClean,
+            mergeLines = useMerge,
+            threadOnly = useThread
+        )
     }
 
     val displayText = when {
         errorText != null -> errorText!!
         rawText.isBlank() -> "(empty)"
-        processedText.isBlank() -> "(Nothing useful after processing)"
-        else -> processedText
+        outputMode == OutputMode.Transcript -> processed.transcript.ifBlank { "(Nothing useful after processing)" }
+        else -> processed.json.ifBlank { "[]" }
     }
 
     if (showCropper && selectedBitmap != null) {
@@ -130,7 +144,7 @@ private fun OcrScreen() {
             verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
             Text(
-                "Pick a screenshot → optionally crop → OCR → optionally clean + merge lines.",
+                "Pick → Crop → OCR → Clean/Merge → Extract thread only.",
                 style = MaterialTheme.typography.bodyMedium
             )
 
@@ -142,8 +156,7 @@ private fun OcrScreen() {
                 Button(
                     onClick = {
                         val bmp = (cropBitmap ?: selectedBitmap)
-                        if (bmp != null) runOcr(bmp)
-                        else errorText = "Pick an image first."
+                        if (bmp != null) runOcr(bmp) else errorText = "Pick an image first."
                     },
                     enabled = !isWorking
                 ) {
@@ -158,29 +171,23 @@ private fun OcrScreen() {
                 }
             }
 
-            // Toggles (the “3 options”)
+            // Toggles
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
-                FilterChip(
-                    selected = useCrop,
-                    onClick = { useCrop = !useCrop },
-                    label = { Text("Crop") }
-                )
-                FilterChip(
-                    selected = useClean,
-                    onClick = { useClean = !useClean },
-                    label = { Text("Clean") }
-                )
-                FilterChip(
-                    selected = useMerge,
-                    onClick = { useMerge = !useMerge },
-                    label = { Text("Merge lines") }
-                )
+                FilterChip(selected = useCrop, onClick = { useCrop = !useCrop }, label = { Text("Crop") })
+                FilterChip(selected = useClean, onClick = { useClean = !useClean }, label = { Text("Clean") })
+                FilterChip(selected = useMerge, onClick = { useMerge = !useMerge }, label = { Text("Merge") })
+                FilterChip(selected = useThread, onClick = { useThread = !useThread }, label = { Text("Thread") })
             }
 
-            if (useCrop && selectedBitmap != null && cropBitmap == null) {
-                Text(
-                    "Tip: Tap “Crop” and box the chat area for way cleaner extraction.",
-                    style = MaterialTheme.typography.bodySmall
+            // Output mode
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
+                AssistChip(
+                    onClick = { outputMode = OutputMode.Transcript },
+                    label = { Text("Transcript") }
+                )
+                AssistChip(
+                    onClick = { outputMode = OutputMode.Json },
+                    label = { Text("JSON") }
                 )
             }
 
@@ -196,7 +203,7 @@ private fun OcrScreen() {
                 Divider()
                 Text("Debug", style = MaterialTheme.typography.titleSmall)
                 Text(
-                    "Raw length: ${rawText.length}, Processed length: ${processedText.length}",
+                    "Raw: ${rawText.length} chars | Messages: ${processed.messageCount}",
                     style = MaterialTheme.typography.bodySmall
                 )
             }
@@ -216,9 +223,6 @@ private fun decodeBitmap(context: android.content.Context, uri: Uri): Bitmap {
     }
 }
 
-/**
- * Crop a bitmap using normalized [0..1] rect values.
- */
 internal fun cropBitmapNormalized(
     src: Bitmap,
     leftN: Float,
