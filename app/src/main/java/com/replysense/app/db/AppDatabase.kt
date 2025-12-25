@@ -1,11 +1,20 @@
 package com.replysense.app.db
 
 /**
- * ReplySense baseline: no persistence layer yet.
- * This stub exists only so leftover references compile during the baseline phase.
+ * ReplySense baseline: NO database layer yet.
  *
- * When you actually want persistence, we’ll replace this with Room (or DataStore).
+ * We intentionally do not include Room/DataStore until the build is stable.
+ * This file exists so any legacy references compile during the baseline phase.
+ *
+ * When you add persistence, we’ll replace this with either:
+ * - Room (AppDatabase : RoomDatabase + @Database)
+ * - DataStore (no database class needed)
  */
 object AppDatabase {
-    // No-op placeholder
+
+    /**
+     * Placeholder accessors so older code can compile if it expects a DAO.
+     * Returns null in baseline builds.
+     */
+    fun replyHistoryDaoOrNull(): ReplyHistoryDao? = null
 }
