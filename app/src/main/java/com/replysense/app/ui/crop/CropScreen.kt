@@ -1,39 +1,40 @@
 package com.replysense.app.ui.crop
 
 import android.graphics.Bitmap
-import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
-import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.unit.dp
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun CropScreen(
-    bitmap: Bitmap,
-    onCancel: () -> Unit,
-    onCropped: (Bitmap) -> Unit,
+    screenshot: Bitmap,
+    onConfirmCrop: (Rect) -> Unit,
+    onCancel: () -> Unit
 ) {
-    var cropRequestKey by remember { mutableIntStateOf(0) }
-    var latestCropped by remember { mutableStateOf<Bitmap?>(null) }
+    var cropRect by remember { mutableStateOf<Rect?>(null) }
 
     Scaffold(
         topBar = {
-            TopAppBar(
-                title = { Text("Crop") },
+            CenterAlignedTopAppBar(
+                title = { Text("Crop Screenshot") },
                 navigationIcon = {
-                    TextButton(onClick = onCancel) { Text("Cancel") }
+                    TextButton(onClick = onCancel) {
+                        Text("Cancel")
+                    }
                 },
                 actions = {
                     TextButton(
+                        enabled = cropRect != null,
                         onClick = {
-                            // Trigger crop generation via CropperUi callback state
-                            cropRequestKey++
+                            cropRect?.let(onConfirmCrop)
                         }
-                    ) { Text("Done") }
+                    ) {
+                        Text("Done")
+                    }
                 }
             )
         }
@@ -41,26 +42,13 @@ fun CropScreen(
         Box(
             modifier = Modifier
                 .fillMaxSize()
-                .background(Color.Black)
                 .padding(padding)
         ) {
             CropperUi(
-                bitmap = bitmap,
-                requestCropKey = cropRequestKey,
-                onCropped = { out ->
-                    latestCropped = out
-                    onCropped(out)
+                bitmap = screenshot,
+                onCropRectChanged = { rect ->
+                    cropRect = rect
                 }
-            )
-
-            // Optional: subtle helper text
-            AssistChip(
-                onClick = {},
-                label = { Text("Drag corners to resize • Drag inside to move") },
-                enabled = false,
-                modifier = Modifier
-                    .align(Alignment.BottomCenter)
-                    .padding(16.dp)
             )
         }
     }
