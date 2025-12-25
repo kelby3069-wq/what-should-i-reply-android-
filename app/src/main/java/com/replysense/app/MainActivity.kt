@@ -1,5 +1,6 @@
 package com.replysense.app
 
+import android.content.Context
 import android.graphics.Bitmap
 import android.net.Uri
 import android.os.Bundle
@@ -30,6 +31,9 @@ class MainActivity : ComponentActivity() {
     }
 }
 
+private const val PREFS = "replysense_prefs"
+private const val KEY_MY_SIDE = "my_side" // "RIGHT" | "LEFT"
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun ReplySenseApp() {
@@ -40,17 +44,16 @@ private fun ReplySenseApp() {
 
     var rawText by remember { mutableStateOf("") }
     var messages by remember { mutableStateOf<List<OcrPostProcess.Msg>>(emptyList()) }
-
-    // UI selection (optional)
     var selectedMsgId by remember { mutableStateOf<Int?>(null) }
-
-    // ✅ NEW: computed “last THEM” target id
     var lastThemId by remember { mutableStateOf<Int?>(null) }
 
     var tone by remember { mutableStateOf(Tone.FLIRTY) }
     var generatedReply by remember { mutableStateOf("") }
     var transcript by remember { mutableStateOf("") }
     var json by remember { mutableStateOf("") }
+
+    // ✅ NEW: persisted “my side”
+    var mySide by remember { mutableStateOf(loadMySide(ctx)) }
 
     val pickImageLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.GetContent()
@@ -72,10 +75,16 @@ private fun ReplySenseApp() {
 
     fun recomputeTargets() {
         lastThemId = messages.lastOrNull { it.dir == OcrPostProcess.Dir.THEM }?.id
-        // Default UI selection:
-        // - If there’s a THEM bubble, select it (best default)
-        // - Otherwise select the last message
         selectedMsgId = lastThemId ?: messages.lastOrNull()?.id
+    }
+
+    fun retagWithMySide() {
+        // Re-run direction classification with current mySide by re-OCR? No.
+        // Instead: keep current extraction but allow the user to flip mySide and re-OCR by one tap.
+        // Practical: flipping mySide primarily affects next OCR runs.
+        // We still keep manual THEM/ME toggle per message.
+        recomputeTargets()
+        rebuildDebug()
     }
 
     fun runOcr(bitmap: Bitmap) {
@@ -89,7 +98,8 @@ private fun ReplySenseApp() {
                 val extracted = OcrLayoutCluster.extractMessages(
                     result = result,
                     imageWidthPx = bitmap.width,
-                    imageHeightPx = bitmap.height
+                    imageHeightPx = bitmap.height,
+                    mySide = mySide
                 )
 
                 messages = if (extracted.isNotEmpty()) extracted else {
@@ -123,22 +133,19 @@ private fun ReplySenseApp() {
     }
 
     fun targetTextPreferThem(): String? {
-        // ✅ Always try last THEM first
         val them = lastThemId?.let { id -> messages.firstOrNull { it.id == id }?.text }
         if (!them.isNullOrBlank()) return them
 
-        // fallback: selected
         val sel = selectedMsgId?.let { id -> messages.firstOrNull { it.id == id }?.text }
         if (!sel.isNullOrBlank()) return sel
 
-        // fallback: last message
         return messages.lastOrNull()?.text
     }
 
     fun generateReply() {
         val src = targetTextPreferThem()?.trim().orEmpty()
         if (src.isBlank()) {
-            generatedReply = "No message found. Try cropping tighter to the chat bubble area."
+            generatedReply = "No message found. Crop tighter to the chat bubbles."
             return
         }
         generatedReply = LocalReplyEngine.generate(src, tone)
@@ -148,7 +155,19 @@ private fun ReplySenseApp() {
         Scaffold(
             topBar = {
                 TopAppBar(
-                    title = { Text("ReplySense OCR") }
+                    title = { Text("ReplySense OCR") },
+                    actions = {
+                        AssistChip(
+                            onClick = {
+                                mySide = if (mySide == OcrLayoutCluster.MySide.RIGHT)
+                                    OcrLayoutCluster.MySide.LEFT else OcrLayoutCluster.MySide.RIGHT
+                                saveMySide(ctx, mySide)
+                                retagWithMySide()
+                            },
+                            label = { Text("My side: ${mySide.name}") }
+                        )
+                        Spacer(Modifier.width(12.dp))
+                    }
                 )
             }
         ) { pad ->
@@ -172,9 +191,10 @@ private fun ReplySenseApp() {
 
                 Spacer(Modifier.height(12.dp))
 
-                // ✅ NEW: Target status + quick action
                 if (messages.isNotEmpty()) {
-                    val targetPreview = targetTextPreferThem()?.take(80)?.let { if (it.length == 80) "$it…" else it } ?: "—"
+                    val targetPreview = targetTextPreferThem()
+                        ?.take(80)
+                        ?.let { if (it.length == 80) "$it…" else it } ?: "—"
                     ElevatedCard(Modifier.fillMaxWidth()) {
                         Column(Modifier.padding(12.dp)) {
                             Text("Reply target (auto)", fontWeight = FontWeight.SemiBold)
@@ -183,10 +203,7 @@ private fun ReplySenseApp() {
                             Spacer(Modifier.height(10.dp))
                             Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                                 Button(
-                                    onClick = {
-                                        // jump selection to last THEM
-                                        selectedMsgId = lastThemId ?: selectedMsgId
-                                    },
+                                    onClick = { selectedMsgId = lastThemId ?: selectedMsgId },
                                     enabled = lastThemId != null
                                 ) { Text("Select last THEM") }
 
@@ -219,10 +236,9 @@ private fun ReplySenseApp() {
 
                 Spacer(Modifier.height(16.dp))
 
-                Button(
-                    onClick = { generateReply() },
-                    enabled = messages.isNotEmpty()
-                ) { Text("Generate reply") }
+                Button(onClick = { generateReply() }, enabled = messages.isNotEmpty()) {
+                    Text("Generate reply")
+                }
 
                 Spacer(Modifier.height(16.dp))
 
@@ -327,7 +343,7 @@ private object LocalReplyEngine {
     }
 }
 
-private fun loadBitmapFromUri(ctx: android.content.Context, uri: Uri): Bitmap? {
+private fun loadBitmapFromUri(ctx: Context, uri: Uri): Bitmap? {
     return try {
         val resolver = ctx.contentResolver
         resolver.openInputStream(uri)?.use { input ->
@@ -344,4 +360,17 @@ private fun messagesToJson(msgs: List<OcrPostProcess.Msg>): String {
         """{"id":${m.id},"dir":"${m.dir.name}","text":"${esc(m.text)}"}"""
     }
     return "[$items]"
+}
+
+private fun loadMySide(ctx: Context): OcrLayoutCluster.MySide {
+    val p = ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+    val v = p.getString(KEY_MY_SIDE, OcrLayoutCluster.MySide.RIGHT.name) ?: OcrLayoutCluster.MySide.RIGHT.name
+    return runCatching { OcrLayoutCluster.MySide.valueOf(v) }.getOrDefault(OcrLayoutCluster.MySide.RIGHT)
+}
+
+private fun saveMySide(ctx: Context, side: OcrLayoutCluster.MySide) {
+    ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+        .edit()
+        .putString(KEY_MY_SIDE, side.name)
+        .apply()
 }
