@@ -1,13 +1,10 @@
 package com.replysense.app.util
 
-import java.util.Locale
-
 object OcrPostProcess {
 
     data class Msg(
-        val idx: Int,
-        val ts: String?,
-        val speaker: String?,
+        val ts: String? = null,
+        val speaker: String? = null,
         val text: String
     )
 
@@ -24,211 +21,228 @@ object OcrPostProcess {
         mergeLines: Boolean,
         threadOnly: Boolean
     ): Processed {
-        var lines = normalize(input)
-        if (clean) lines = cleanLines(lines)
-        if (mergeLines) lines = mergeBrokenLines(lines)
+        val rawLines = input
+            .replace("\r\n", "\n")
+            .replace("\r", "\n")
+            .split("\n")
+            .map { it.trim() }
+            .filter { it.isNotBlank() }
 
-        val msgs = if (threadOnly) extractThread(lines) else listOf(
-            Msg(0, null, null, lines.joinToString("\n"))
-        )
+        val lines = if (clean) rawLines.mapNotNull { normalizeLine(it) } else rawLines
 
-        val transcript = if (threadOnly) {
-            msgs.joinToString("\n\n") { m ->
-                buildString {
-                    if (m.ts != null) append("[${m.ts}] ")
-                    if (m.speaker != null) append("${m.speaker}: ")
-                    append(m.text)
-                }
+        val filtered = lines.filter { line ->
+            if (!threadOnly) return@filter true
+            // Thread-only mode: keep only stuff that looks like chat text
+            looksLikeChatContent(line)
+        }
+
+        val merged = if (!mergeLines) filtered else mergeChatLines(filtered)
+
+        val msgs = splitIntoMessages(merged)
+
+        val transcript = msgs.joinToString("\n") { m ->
+            buildString {
+                if (m.ts != null) append("[${m.ts}] ")
+                if (m.speaker != null) append("${m.speaker}: ")
+                append(m.text)
             }
-        } else {
-            msgs.firstOrNull()?.text.orEmpty()
         }
 
         val json = msgsToJson(msgs)
 
         return Processed(
-            transcript = transcript.trim(),
+            transcript = transcript,
             json = json,
             messageCount = msgs.size,
             messages = msgs
         )
     }
 
-    private fun normalize(input: String): List<String> =
-        input.replace("\r\n", "\n")
-            .split('\n')
-            .map { it.trim() }
-            .filter { it.isNotBlank() }
+    // ---------- Cleaning ----------
 
-    private fun cleanLines(lines: List<String>): List<String> {
-        val blacklistExact = setOf(
+    private fun normalizeLine(s: String): String? {
+        val t = s.trim()
+
+        // Hard drop common UI / OCR junk
+        if (t.length <= 1) return null
+        if (isKeyboardRow(t)) return null
+        if (isOnlyNumbersOrSpacedNumbers(t)) return null
+        if (isUiChrome(t)) return null
+
+        // Compress repeated spaces
+        val cleaned = t.replace(Regex("\\s{2,}"), " ").trim()
+        if (cleaned.isBlank()) return null
+
+        // Drop lines that are basically random caps fragments (but keep real acronyms inside sentences)
+        if (looksLikeGibberishCaps(cleaned)) return null
+
+        return cleaned
+    }
+
+    private fun isUiChrome(t: String): Boolean {
+        val low = t.lowercase()
+        val exact = setOf(
             "active now",
             "message",
             "english (us)",
             "search",
-            "home",
-            "back",
-            "typing…",
-            "typing..."
+            "watch",
+            "today",
+            "yesterday"
         )
-
-        fun isKeyboardRow(s: String): Boolean {
-            val tokens = s.split(Regex("\\s+")).filter { it.isNotBlank() }
-            if (tokens.size < 6) return false
-            val singleLetter = tokens.count { it.length == 1 && it[0].isLetter() }
-            return singleLetter >= 6
-        }
-
-        fun isLoneDigitLine(s: String): Boolean = s.length <= 2 && s.all { it.isDigit() }
-
-        val timeRegex = Regex("""^\d{1,2}:\d{2}\s?(AM|PM)?$""", RegexOption.IGNORE_CASE)
-
-        fun isSymbolNoise(s: String): Boolean =
-            s.length <= 2 && s.any { !it.isLetterOrDigit() } && s.all { !it.isLetterOrDigit() || it == '+' }
-
-        return lines.filter { raw ->
-            val s = raw.trim()
-            val lower = s.lowercase(Locale.US)
-
-            if (blacklistExact.contains(lower)) return@filter false
-            if (isKeyboardRow(s)) return@filter false
-            if (isLoneDigitLine(s)) return@filter false
-            if (timeRegex.matches(s)) return@filter false
-            if (isSymbolNoise(s)) return@filter false
-            if (lower == "||" || lower == "|" || lower == "ll") return@filter false
-
-            true
-        }
+        if (low in exact) return true
+        if (low.startsWith("watch ")) return true
+        if (low.contains("active now")) return true
+        if (low.contains("english (us)")) return true
+        if (low == "replysense ocr") return true
+        return false
     }
 
-    private fun mergeBrokenLines(lines: List<String>): List<String> {
-        if (lines.isEmpty()) return lines
+    private fun isOnlyNumbersOrSpacedNumbers(t: String): Boolean {
+        // "1 2 3 4 5" or "12345"
+        val stripped = t.replace(" ", "")
+        if (stripped.isEmpty()) return false
+        return stripped.all { it.isDigit() }
+    }
 
+    private fun isKeyboardRow(t: String): Boolean {
+        // Typical OCR of on-screen keyboard rows
+        val low = t.lowercase().replace(" ", "")
+        val keyboardPatterns = listOf(
+            "qwertyuiop",
+            "asdfghjkl",
+            "zxcvbnm"
+        )
+        if (keyboardPatterns.any { low.contains(it) }) return true
+
+        // Also reject mostly single-letter tokens like: "Q WE RTY U" or "A S D"
+        val tokens = t.split(Regex("\\s+")).filter { it.isNotBlank() }
+        if (tokens.size >= 4 && tokens.all { it.length <= 2 && it.any { c -> c.isLetter() } }) {
+            val lettersOnly = tokens.joinToString("") { it.filter { c -> c.isLetter() } }.lowercase()
+            if (lettersOnly.contains("qwerty") || lettersOnly.contains("asdf") || lettersOnly.contains("zxcv")) return true
+        }
+        return false
+    }
+
+    private fun looksLikeGibberishCaps(t: String): Boolean {
+        // If line is mostly caps tokens with little vowel/space structure, it's likely UI/keyboard OCR.
+        // Keep normal sentences even if they contain acronyms.
+        val tokens = t.split(Regex("\\s+")).filter { it.isNotBlank() }
+        if (tokens.size < 4) return false
+
+        val capLike = tokens.count { tok ->
+            tok.length in 1..3 && tok.all { it.isLetter() } && tok == tok.uppercase()
+        }
+        if (capLike >= tokens.size - 1) return true
+
+        return false
+    }
+
+    // ---------- Chat detection & merging ----------
+
+    private fun looksLikeChatContent(line: String): Boolean {
+        val t = line.trim()
+        if (t.length < 3) return false
+        if (isKeyboardRow(t)) return false
+        if (isOnlyNumbersOrSpacedNumbers(t)) return false
+        if (isUiChrome(t)) return false
+
+        // looks like a sentence-ish line
+        val hasSpace = t.contains(' ')
+        val hasLetters = t.any { it.isLetter() }
+        val hasPunct = t.any { it in ".?!," }
+        val longEnough = t.length >= 12
+
+        return hasLetters && (longEnough || (hasSpace && (hasPunct || t.length >= 8)))
+    }
+
+    private fun mergeChatLines(lines: List<String>): List<String> {
+        if (lines.isEmpty()) return emptyList()
         val out = mutableListOf<String>()
-        var buf = lines.first()
-
-        fun endsHard(s: String): Boolean {
-            val t = s.trim()
-            if (t.isEmpty()) return true
-            val last = t.last()
-            return last in listOf('.', '!', '?', ':')
-        }
-
-        fun startsLower(s: String): Boolean {
-            val t = s.trim()
-            if (t.isEmpty()) return false
-            val c = t.first()
-            return c.isLowerCase()
-        }
-
-        fun looksLikeHeaderOrName(s: String): Boolean {
-            val t = s.trim()
-            if (t.length in 2..26 && t.count { it == ' ' } <= 2) {
-                val words = t.split(" ").filter { it.isNotBlank() }
-                if (words.size in 1..3 && words.all { it.firstOrNull()?.isUpperCase() == true }) return true
-            }
-            return false
-        }
-
-        for (i in 1 until lines.size) {
-            val next = lines[i].trim()
-
-            val merge =
-                !looksLikeHeaderOrName(next) &&
-                    (
-                        startsLower(next) ||
-                            (!endsHard(buf) && buf.length >= 12) ||
-                            (buf.length < 22 && next.length >= 10)
-                        )
-
-            if (merge) {
-                buf = "$buf $next".replace(Regex("\\s+"), " ").trim()
-            } else {
-                out += buf
-                buf = next
-            }
-        }
-
-        out += buf
-        return out
-    }
-
-    private fun extractThread(lines: List<String>): List<Msg> {
-        val tsRegex = Regex("""\b\d{1,2}:\d{2}\s?(AM|PM)?\b""", RegexOption.IGNORE_CASE)
-        val daySepRegex = Regex("""^(today|yesterday|mon|tue|wed|thu|fri|sat|sun)(day)?\b""", RegexOption.IGNORE_CASE)
-
-        fun looksLikeNameHeader(s: String): Boolean {
-            val t = s.trim()
-            if (t.length !in 2..26) return false
-            val words = t.split(" ").filter { it.isNotBlank() }
-            if (words.isEmpty() || words.size > 3) return false
-            return words.all { it.firstOrNull()?.isUpperCase() == true }
-        }
-
-        val msgs = mutableListOf<Msg>()
-        var currentTs: String? = null
-        var currentSpeaker: String? = null
-        val buf = mutableListOf<String>()
+        val buffer = StringBuilder()
 
         fun flush() {
-            val text = buf.joinToString(" ").replace(Regex("\\s+"), " ").trim()
-            if (text.isNotBlank()) {
-                msgs += Msg(
-                    idx = msgs.size,
-                    ts = currentTs,
-                    speaker = currentSpeaker,
-                    text = text
-                )
-            }
-            buf.clear()
-            currentTs = null
-            currentSpeaker = null
+            val s = buffer.toString().trim()
+            if (s.isNotBlank()) out.add(s)
+            buffer.clear()
         }
 
         for (line in lines) {
-            val s = line.trim()
-            if (s.isBlank()) continue
-            if (daySepRegex.containsMatchIn(s)) continue
-
-            val hasTs = tsRegex.containsMatchIn(s)
-            val isName = looksLikeNameHeader(s)
-
-            if (isName && buf.isNotEmpty()) flush()
-
-            if (hasTs) {
-                if (buf.isNotEmpty()) flush()
-                currentTs = tsRegex.find(s)?.value
-                val remaining = s.replace(tsRegex, "").trim()
-                if (remaining.isNotBlank()) buf += remaining
+            // If line looks like a timestamp header, split
+            if (looksLikeTimestamp(line) && buffer.isNotEmpty()) {
+                flush()
+                buffer.append(line)
                 continue
             }
 
-            if (isName) {
-                currentSpeaker = s
+            // If buffer empty, start
+            if (buffer.isEmpty()) {
+                buffer.append(line)
                 continue
             }
 
-            buf += s
+            // Join “continuation lines” into same message
+            val prev = buffer.toString()
+            val shouldJoin =
+                !looksLikeNewMessageBoundary(prev, line)
+
+            if (shouldJoin) {
+                buffer.append(' ')
+                buffer.append(line)
+            } else {
+                flush()
+                buffer.append(line)
+            }
         }
-
         flush()
-        return msgs.filter { it.text.length >= 2 }
+        return out
+    }
+
+    private fun looksLikeTimestamp(line: String): Boolean {
+        // crude: "12:38 AM", "7:05 PM"
+        return Regex("""\b\d{1,2}:\d{2}\s?(AM|PM)\b""", RegexOption.IGNORE_CASE).containsMatchIn(line)
+    }
+
+    private fun looksLikeNewMessageBoundary(prev: String, next: String): Boolean {
+        // boundary if next starts like a new thought or a timestamp
+        if (looksLikeTimestamp(next)) return true
+        // boundary if next is very long and prev ends with punctuation (new msg often follows)
+        if (prev.trim().lastOrNull() in listOf('.', '!', '?') && next.length >= 10) return true
+        return false
+    }
+
+    // ---------- Split into messages ----------
+
+    private fun splitIntoMessages(lines: List<String>): List<Msg> {
+        if (lines.isEmpty()) return emptyList()
+
+        // Basic approach: each merged line becomes a message,
+        // but if it contains a timestamp + text, we keep it as one message anyway.
+        return lines.map { line ->
+            // Try extract timestamp if present
+            val m = Regex("""^(.*\b\d{1,2}:\d{2}\s?(AM|PM)\b)\s+(.*)$""", RegexOption.IGNORE_CASE)
+                .find(line)
+            if (m != null) {
+                val ts = m.groupValues[1].trim()
+                val txt = m.groupValues[3].trim()
+                Msg(ts = ts, text = txt)
+            } else {
+                Msg(text = line.trim())
+            }
+        }.filter { it.text.isNotBlank() }
     }
 
     private fun msgsToJson(msgs: List<Msg>): String {
-        fun esc(s: String): String =
-            s.replace("\\", "\\\\").replace("\"", "\\\"").replace("\n", "\\n")
+        fun esc(s: String) = s
+            .replace("\\", "\\\\")
+            .replace("\"", "\\\"")
+            .replace("\n", "\\n")
 
         val items = msgs.joinToString(",") { m ->
-            buildString {
-                append("{")
-                append("\"idx\":${m.idx},")
-                append("\"ts\":${m.ts?.let { "\"${esc(it)}\"" } ?: "null"},")
-                append("\"speaker\":${m.speaker?.let { "\"${esc(it)}\"" } ?: "null"},")
-                append("\"text\":\"${esc(m.text)}\"")
-                append("}")
-            }
+            val ts = m.ts?.let { "\"ts\":\"${esc(it)}\"," } ?: ""
+            val sp = m.speaker?.let { "\"speaker\":\"${esc(it)}\"," } ?: ""
+            """{${ts}${sp}"text":"${esc(m.text)}"}"""
         }
         return "[$items]"
     }
-                       }
+}
