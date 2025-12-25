@@ -4,22 +4,22 @@ import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 
 @Serializable
-data class ReplyRequest(
-    val message: String,
-    val vibe: String? = null,
-    val context: String? = null
+data class ChatMessage(
+    @SerialName("role")
+    val role: String,
+
+    @SerialName("content")
+    val content: String
 )
 
 @Serializable
-data class ReplyOption(
-    val text: String,
-    val tone: String? = null,
-    val label: String? = null
+data class ChatRequest(
+    @SerialName("messages")
+    val messages: List<ChatMessage>
 )
 
 @Serializable
-data class ReplyResponse(
-    val options: List<ReplyOption> = emptyList(),
-    val error: String? = null,
-    val details: String? = null
+data class ChatResponse(
+    @SerialName("reply")
+    val reply: String
 )
