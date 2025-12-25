@@ -2,12 +2,7 @@ package com.replysense.app.net
 
 /**
  * ReplySense baseline stub.
- *
- * Networking is disabled until after:
- * - Gradle
- * - Compose
- * - ML Kit OCR
- * are fully stable.
+ * Networking disabled until baseline build is stable.
  */
 object Api {
 
