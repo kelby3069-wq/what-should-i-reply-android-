@@ -10,15 +10,13 @@
  */
 
 export default {
-  async fetch(request, env, ctx) {
+  async fetch(request, env) {
     try {
       const url = new URL(request.url);
       const { pathname } = url;
 
       // CORS preflight
-      if (request.method === "OPTIONS") {
-        return corsResponse("", 204);
-      }
+      if (request.method === "OPTIONS") return corsResponse("", 204);
 
       if (request.method === "GET" && pathname === "/") {
         return corsJson(
@@ -39,12 +37,7 @@ export default {
       if (request.method === "GET" && pathname === "/health") {
         const hasKey = Boolean(env?.OPENAI_API_KEY && String(env.OPENAI_API_KEY).trim().length > 0);
         return corsJson(
-          {
-            ok: true,
-            service: "reply-sense",
-            hasOpenAIKey: hasKey,
-            now: new Date().toISOString(),
-          },
+          { ok: true, service: "reply-sense", hasOpenAIKey: hasKey, now: new Date().toISOString() },
           200
         );
       }
@@ -61,18 +54,12 @@ export default {
         const system = buildSystemPrompt();
         const user = buildUserPrompt(normalized);
 
-        // ✅ CORRECT OpenAI Responses API payload (NO `response`, NO `response_format`)
+        // ✅ Correct OpenAI Responses payload (NO deprecated keys)
         const openaiPayload = {
           model: pickModel(body?.model),
           input: [
-            {
-              role: "system",
-              content: [{ type: "input_text", text: system }],
-            },
-            {
-              role: "user",
-              content: [{ type: "input_text", text: user }],
-            },
+            { role: "system", content: [{ type: "input_text", text: system }] },
+            { role: "user", content: [{ type: "input_text", text: user }] },
           ],
           temperature: 0.7,
           max_output_tokens: 700,
@@ -89,64 +76,60 @@ export default {
 
         const rawText = await resp.text();
         if (!resp.ok) {
-          // bubble the real OpenAI error back
           return corsJson(
             {
               ok: false,
               error: "OpenAI request failed.",
               status: resp.status,
-              details: safeTruncate(rawText, 5000),
+              details: safeTruncate(rawText, 7000),
             },
             500
           );
         }
 
         const data = safeParseJson(rawText) ?? { _raw: rawText };
-
-        // Extract assistant text robustly
         const assistantText = extractOutputText(data);
 
-        // Expect JSON output; try parse
-        const parsed = safeParseJson(extractJsonBlock(assistantText)) ?? null;
+        // ✅ FIX: model sometimes emits multiple JSON objects; grab only the first complete one
+        const firstJson = extractFirstJsonObject(assistantText);
+        const parsed = firstJson ? safeParseJson(firstJson) : null;
+
         if (!parsed) {
           return corsJson(
             {
               ok: false,
               error: "Model output was not valid JSON.",
               status: 500,
-              details: safeTruncate(assistantText || rawText, 5000),
+              details: safeTruncate(assistantText || rawText, 7000),
             },
             500
           );
         }
 
-        // Validate shape lightly
         const replies = Array.isArray(parsed.replies) ? parsed.replies : [];
         const result = parsed.result && typeof parsed.result === "object" ? parsed.result : {};
         const notes = typeof parsed.notes === "string" ? parsed.notes : undefined;
 
-        const responseBody = {
-          ok: true,
-          model: openaiPayload.model,
-          request: {
-            variants: normalized.variants,
-            vibe: normalized.vibe,
-            tone: normalized.tone,
-            writingStyle: normalized.writingStyle,
-            textQuality: normalized.textQuality,
-            emojiLevel: normalized.emojiLevel,
-            spiceLevel: normalized.spiceLevel,
-            age: normalized.age,
-            punctuationPreference: normalized.punctuationPreference,
+        return corsJson(
+          {
+            ok: true,
+            model: openaiPayload.model,
+            request: {
+              variants: normalized.variants,
+              vibe: normalized.vibe,
+              tone: normalized.tone,
+              writingStyle: normalized.writingStyle,
+              textQuality: normalized.textQuality,
+              emojiLevel: normalized.emojiLevel,
+              spiceLevel: normalized.spiceLevel,
+              age: normalized.age,
+              punctuationPreference: normalized.punctuationPreference,
+            },
+            result: { ...result, ...(notes ? { notes } : {}) },
+            replies: replies.slice(0, normalized.variants),
           },
-          result: {
-            ...result,
-            ...(notes ? { notes } : {}),
-          },
-          replies: replies.slice(0, normalized.variants),
-        };
-
-        return corsJson(responseBody, 200);
+          200
+        );
       }
 
       return corsJson({ ok: false, error: "Not found." }, 404);
@@ -155,7 +138,7 @@ export default {
         {
           ok: false,
           error: "Server error.",
-          details: safeTruncate(String(err?.stack || err?.message || err), 3000),
+          details: safeTruncate(String(err?.stack || err?.message || err), 5000),
         },
         500
       );
@@ -212,7 +195,6 @@ function safeTruncate(s, max) {
 
 function pickModel(model) {
   const m = String(model || "").trim();
-  // default (stable, cheap)
   return m || "gpt-4.1-mini";
 }
 
@@ -262,14 +244,13 @@ function normAutoStr(v, fallback = "auto") {
 }
 
 function buildSystemPrompt() {
-  // Keep this high-signal. No over-focus on “spice”.
   return `
 You are ReplySense: generate text-message reply options that match the conversation's vibe and the user's style.
-Goal: produce natural replies that fit context, relationship tone, and the user's writing habits.
 
 OUTPUT RULES:
-- Output MUST be valid JSON only (no markdown, no backticks).
-- JSON schema:
+- Output MUST be ONE valid JSON object only. Do NOT output multiple JSON objects.
+- No markdown, no backticks, no extra commentary.
+- Schema:
   {
     "result": {
       "vibe": string,
@@ -284,55 +265,40 @@ OUTPUT RULES:
   }
 
 QUALITY RULES:
-- Keep replies short, like real texting.
-- Avoid sounding like a bot. No therapy speak unless the user is serious.
-- If the input is casual, stay casual. If it's serious, be respectful.
-- "spiceLevel" is ONLY about flirtiness/romance intensity, not explicit content. If conversation is normal, spiceLevel should be 0.
-- Match punctuationPreference + textQuality (clean/normal/messy) without making it unreadable.
-- Never include explicit sexual content. Keep it PG-13 max.
+- Keep replies short like real texting.
+- Avoid sounding like a bot.
+- spiceLevel is flirtiness (PG-13 max). If normal convo, spiceLevel=0.
 `.trim();
 }
 
 function buildUserPrompt(r) {
-  const transcript = r.conversation
-    .map((m) => `${m.from.toUpperCase()}: ${m.text}`)
-    .join("\n");
-
+  const transcript = r.conversation.map((m) => `${m.from.toUpperCase()}: ${m.text}`).join("\n");
   return `
-CONTEXT:
-We are drafting replies to the latest message(s).
-
 TRANSCRIPT:
 ${transcript}
 
-PREFERENCES:
-- variants: ${r.variants}
-- vibe: ${r.vibe}
-- tone: ${r.tone}
-- writingStyle: ${r.writingStyle}
-- textQuality: ${r.textQuality}
-- emojiLevel: ${r.emojiLevel}
-- spiceLevel: ${r.spiceLevel}
-- age: ${r.age}
-- punctuationPreference: ${r.punctuationPreference}
+PREFERENCES (use best judgment when "auto"):
+variants=${r.variants}
+vibe=${r.vibe}
+tone=${r.tone}
+writingStyle=${r.writingStyle}
+textQuality=${r.textQuality}
+emojiLevel=${r.emojiLevel}
+spiceLevel=${r.spiceLevel}
+age=${r.age}
+punctuationPreference=${r.punctuationPreference}
 
-TASK:
-1) Infer best-fitting values when any preference is "auto".
-2) Produce ${r.variants} distinct reply options (not numbered), each as a plain string.
-3) Keep replies realistic and aligned to the inferred vibe and user style.
-Return JSON only.
+Return ONE JSON object only.
 `.trim();
 }
 
 /**
  * Extract text from OpenAI Responses API result.
- * Handles multiple shapes: output_text shortcut or output[].content[].text etc.
  */
 function extractOutputText(data) {
   if (!data || typeof data !== "object") return "";
   if (typeof data.output_text === "string") return data.output_text;
 
-  // common: data.output is an array of items, each has content array with output_text
   const out = data.output;
   if (Array.isArray(out)) {
     let buf = "";
@@ -341,28 +307,54 @@ function extractOutputText(data) {
       if (!Array.isArray(content)) continue;
       for (const c of content) {
         if (c?.type === "output_text" && typeof c?.text === "string") buf += c.text;
-        if (c?.type === "output_text" && typeof c?.text === "object" && typeof c?.text?.value === "string") buf += c.text.value;
-        if (typeof c?.text === "string") buf += c.text; // fallback
+        else if (typeof c?.text === "string") buf += c.text;
       }
     }
     return buf.trim();
   }
 
-  // fallback: raw string
-  return typeof data === "string" ? data : "";
+  return "";
 }
 
 /**
- * If model returns extra text, try to isolate JSON block.
+ * ✅ Extract the FIRST complete JSON object from a string.
+ * Works even if multiple JSON objects are concatenated.
+ * Handles braces inside string literals properly.
  */
-function extractJsonBlock(s) {
-  const str = String(s || "").trim();
-  if (!str) return str;
+function extractFirstJsonObject(s) {
+  const str = String(s || "");
+  const start = str.indexOf("{");
+  if (start === -1) return "";
 
-  const first = str.indexOf("{");
-  const last = str.lastIndexOf("}");
-  if (first !== -1 && last !== -1 && last > first) {
-    return str.slice(first, last + 1);
+  let depth = 0;
+  let inString = false;
+  let escape = false;
+
+  for (let i = start; i < str.length; i++) {
+    const ch = str[i];
+
+    if (inString) {
+      if (escape) {
+        escape = false;
+      } else if (ch === "\\") {
+        escape = true;
+      } else if (ch === '"') {
+        inString = false;
+      }
+      continue;
+    } else {
+      if (ch === '"') {
+        inString = true;
+        continue;
+      }
+      if (ch === "{") depth++;
+      if (ch === "}") depth--;
+
+      if (depth === 0) {
+        return str.slice(start, i + 1).trim();
+      }
+    }
   }
-  return str;
-}
+
+  return "";
+       }
