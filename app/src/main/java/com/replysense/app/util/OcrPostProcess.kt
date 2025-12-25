@@ -4,17 +4,18 @@ import java.util.Locale
 
 object OcrPostProcess {
 
+    data class Msg(
+        val idx: Int,
+        val ts: String?,
+        val speaker: String?,
+        val text: String
+    )
+
     data class Processed(
         val transcript: String,
         val json: String,
-        val messageCount: Int
-    )
-
-    data class Msg(
-        val idx: Int,
-        val ts: String?,     // if we detect a timestamp
-        val speaker: String?,// if we detect a name/header
-        val text: String
+        val messageCount: Int,
+        val messages: List<Msg>
     )
 
     fun processThreadAware(
@@ -45,17 +46,20 @@ object OcrPostProcess {
 
         val json = msgsToJson(msgs)
 
-        return Processed(transcript = transcript.trim(), json = json, messageCount = msgs.size)
+        return Processed(
+            transcript = transcript.trim(),
+            json = json,
+            messageCount = msgs.size,
+            messages = msgs
+        )
     }
 
-    // ---------- Normalize ----------
     private fun normalize(input: String): List<String> =
         input.replace("\r\n", "\n")
             .split('\n')
             .map { it.trim() }
             .filter { it.isNotBlank() }
 
-    // ---------- Clean ----------
     private fun cleanLines(lines: List<String>): List<String> {
         val blacklistExact = setOf(
             "active now",
@@ -97,7 +101,6 @@ object OcrPostProcess {
         }
     }
 
-    // ---------- Merge broken lines ----------
     private fun mergeBrokenLines(lines: List<String>): List<String> {
         if (lines.isEmpty()) return lines
 
@@ -150,9 +153,7 @@ object OcrPostProcess {
         return out
     }
 
-    // ---------- Thread extraction ----------
     private fun extractThread(lines: List<String>): List<Msg> {
-        // Detect lines that "look like timestamps", plus optional day separators
         val tsRegex = Regex("""\b\d{1,2}:\d{2}\s?(AM|PM)?\b""", RegexOption.IGNORE_CASE)
         val daySepRegex = Regex("""^(today|yesterday|mon|tue|wed|thu|fri|sat|sun)(day)?\b""", RegexOption.IGNORE_CASE)
 
@@ -161,14 +162,9 @@ object OcrPostProcess {
             if (t.length !in 2..26) return false
             val words = t.split(" ").filter { it.isNotBlank() }
             if (words.isEmpty() || words.size > 3) return false
-            // all words capitalized -> likely a contact name
             return words.all { it.firstOrNull()?.isUpperCase() == true }
         }
 
-        // Heuristic: build message blocks. A new block starts at:
-        // - a timestamp line OR
-        // - a name header line OR
-        // - a large gap marker we already cleaned out (rare)
         val msgs = mutableListOf<Msg>()
         var currentTs: String? = null
         var currentSpeaker: String? = null
@@ -186,30 +182,22 @@ object OcrPostProcess {
             }
             buf.clear()
             currentTs = null
-            // keep speaker until a new one is detected? we’ll reset (safer)
             currentSpeaker = null
         }
 
         for (line in lines) {
             val s = line.trim()
             if (s.isBlank()) continue
-
-            // Skip separators
             if (daySepRegex.containsMatchIn(s)) continue
 
             val hasTs = tsRegex.containsMatchIn(s)
             val isName = looksLikeNameHeader(s)
 
-            if (isName && buf.isNotEmpty()) {
-                flush()
-            }
+            if (isName && buf.isNotEmpty()) flush()
 
             if (hasTs) {
-                // If timestamp appears alone or at end, treat as boundary.
                 if (buf.isNotEmpty()) flush()
-                // capture the first timestamp string
                 currentTs = tsRegex.find(s)?.value
-                // If there's more than just the timestamp, keep remaining text
                 val remaining = s.replace(tsRegex, "").trim()
                 if (remaining.isNotBlank()) buf += remaining
                 continue
@@ -220,17 +208,13 @@ object OcrPostProcess {
                 continue
             }
 
-            // Normal content line
             buf += s
         }
 
         flush()
-
-        // Final pass: remove tiny garbage "messages"
         return msgs.filter { it.text.length >= 2 }
     }
 
-    // ---------- JSON ----------
     private fun msgsToJson(msgs: List<Msg>): String {
         fun esc(s: String): String =
             s.replace("\\", "\\\\").replace("\"", "\\\"").replace("\n", "\\n")
