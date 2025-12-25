@@ -5,6 +5,7 @@ import android.graphics.Bitmap
 import android.net.Uri
 import android.os.Bundle
 import androidx.activity.ComponentActivity
+import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.clickable
@@ -52,7 +53,7 @@ private fun ReplySenseApp() {
     var transcript by remember { mutableStateOf("") }
     var json by remember { mutableStateOf("") }
 
-    // ✅ NEW: persisted “my side”
+    // persisted “my side”
     var mySide by remember { mutableStateOf(loadMySide(ctx)) }
 
     val pickImageLauncher = rememberLauncherForActivityResult(
@@ -76,15 +77,6 @@ private fun ReplySenseApp() {
     fun recomputeTargets() {
         lastThemId = messages.lastOrNull { it.dir == OcrPostProcess.Dir.THEM }?.id
         selectedMsgId = lastThemId ?: messages.lastOrNull()?.id
-    }
-
-    fun retagWithMySide() {
-        // Re-run direction classification with current mySide by re-OCR? No.
-        // Instead: keep current extraction but allow the user to flip mySide and re-OCR by one tap.
-        // Practical: flipping mySide primarily affects next OCR runs.
-        // We still keep manual THEM/ME toggle per message.
-        recomputeTargets()
-        rebuildDebug()
     }
 
     fun runOcr(bitmap: Bitmap) {
@@ -162,7 +154,6 @@ private fun ReplySenseApp() {
                                 mySide = if (mySide == OcrLayoutCluster.MySide.RIGHT)
                                     OcrLayoutCluster.MySide.LEFT else OcrLayoutCluster.MySide.RIGHT
                                 saveMySide(ctx, mySide)
-                                retagWithMySide()
                             },
                             label = { Text("My side: ${mySide.name}") }
                         )
@@ -186,9 +177,7 @@ private fun ReplySenseApp() {
                 }
 
                 Spacer(Modifier.height(12.dp))
-
                 ToneRow(tone = tone, onTone = { tone = it })
-
                 Spacer(Modifier.height(12.dp))
 
                 if (messages.isNotEmpty()) {
