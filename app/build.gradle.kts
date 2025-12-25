@@ -1,31 +1,35 @@
 plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.android")
-    id("org.jetbrains.kotlin.plugin.compose")
 }
 
 android {
     namespace = "com.replysense.app"
-    compileSdk = 35
+    compileSdk = 34
 
     defaultConfig {
         applicationId = "com.replysense.app"
         minSdk = 24
-        targetSdk = 35
+        targetSdk = 34
         versionCode = 1
         versionName = "1.0"
+
+        testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+        vectorDrawables {
+            useSupportLibrary = true
+        }
     }
 
     buildTypes {
-        debug {
-            isMinifyEnabled = false
-        }
         release {
             isMinifyEnabled = false
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"
             )
+        }
+        debug {
+            isMinifyEnabled = false
         }
     }
 
@@ -34,48 +38,53 @@ android {
         targetCompatibility = JavaVersion.VERSION_17
     }
 
-    kotlin { jvmToolchain(17) }
+    kotlinOptions {
+        jvmTarget = "17"
+    }
 
     buildFeatures {
         compose = true
-        // BuildConfig needed because legacy code references it
-        buildConfig = true
+    }
+
+    composeOptions {
+        kotlinCompilerExtensionVersion = "1.5.14"
     }
 
     packaging {
         resources {
-            excludes += setOf(
-                "/META-INF/{AL2.0,LGPL2.1}",
-                "META-INF/DEPENDENCIES",
-                "META-INF/LICENSE",
-                "META-INF/LICENSE.txt",
-                "META-INF/NOTICE",
-                "META-INF/NOTICE.txt"
-            )
+            excludes += "/META-INF/{AL2.0,LGPL2.1}"
         }
     }
 }
 
 dependencies {
-    implementation(platform("androidx.compose:compose-bom:2025.12.00"))
-    androidTestImplementation(platform("androidx.compose:compose-bom:2025.12.00"))
 
-    implementation("androidx.core:core-ktx:1.16.0")
-    implementation("androidx.activity:activity-compose:1.10.1")
+    /* ---------------- Core Android ---------------- */
+    implementation("androidx.core:core-ktx:1.13.1")
+    implementation("androidx.lifecycle:lifecycle-runtime-ktx:2.8.4")
+    implementation("androidx.activity:activity-compose:1.9.2")
+
+    /* ---------------- Compose BOM ---------------- */
+    implementation(platform("androidx.compose:compose-bom:2024.09.00"))
+    androidTestImplementation(platform("androidx.compose:compose-bom:2024.09.00"))
 
     implementation("androidx.compose.ui:ui")
+    implementation("androidx.compose.ui:ui-graphics")
     implementation("androidx.compose.ui:ui-tooling-preview")
+
+    /* ---------------- Material 3 ---------------- */
     implementation("androidx.compose.material3:material3")
 
+    /* ✅ REQUIRED for ArrowBack, Icons.Default.*, etc. */
+    implementation("androidx.compose.material:material-icons-extended")
+
+    /* ---------------- Tooling ---------------- */
     debugImplementation("androidx.compose.ui:ui-tooling")
     debugImplementation("androidx.compose.ui:ui-test-manifest")
 
-    // Provides Theme.Material3.* XML parents for themes.xml
-    implementation("com.google.android.material:material:1.13.0")
-
-    // Needed for StateFlow/MutableStateFlow used by the baseline ViewModel stub
-    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.10.2")
-
-    // ML Kit OCR
-    implementation("com.google.mlkit:text-recognition:16.0.1")
+    /* ---------------- Testing ---------------- */
+    testImplementation("junit:junit:4.13.2")
+    androidTestImplementation("androidx.test.ext:junit:1.2.1")
+    androidTestImplementation("androidx.test.espresso:espresso-core:3.6.1")
+    androidTestImplementation("androidx.compose.ui:ui-test-junit4")
 }
