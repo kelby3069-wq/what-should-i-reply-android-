@@ -8,71 +8,84 @@ import androidx.compose.ui.unit.sp
 
 /**
  * Premium hierarchy:
- * - Bigger headlines, calm body sizes
- * - Slightly stronger titles
- * - System Sans for now (we can drop Inter later)
+ * - Slightly tighter large titles
+ * - Strong labels
+ * - Calm body text
  */
-private val AppFont = FontFamily.SansSerif
-
-val AppTypography = Typography(
+val ReplySenseTypography = Typography(
     headlineLarge = TextStyle(
-        fontFamily = AppFont,
+        fontFamily = FontFamily.SansSerif,
         fontWeight = FontWeight.SemiBold,
-        fontSize = 28.sp,
-        lineHeight = 34.sp
+        fontSize = 34.sp,
+        lineHeight = 40.sp,
+        letterSpacing = (-0.3).sp
     ),
     headlineMedium = TextStyle(
-        fontFamily = AppFont,
+        fontFamily = FontFamily.SansSerif,
         fontWeight = FontWeight.SemiBold,
-        fontSize = 24.sp,
-        lineHeight = 30.sp
+        fontSize = 28.sp,
+        lineHeight = 34.sp,
+        letterSpacing = (-0.2).sp
     ),
     headlineSmall = TextStyle(
-        fontFamily = AppFont,
+        fontFamily = FontFamily.SansSerif,
         fontWeight = FontWeight.SemiBold,
-        fontSize = 20.sp,
-        lineHeight = 26.sp
+        fontSize = 22.sp,
+        lineHeight = 28.sp,
+        letterSpacing = (-0.1).sp
     ),
     titleLarge = TextStyle(
-        fontFamily = AppFont,
+        fontFamily = FontFamily.SansSerif,
         fontWeight = FontWeight.SemiBold,
         fontSize = 18.sp,
         lineHeight = 24.sp
     ),
     titleMedium = TextStyle(
-        fontFamily = AppFont,
+        fontFamily = FontFamily.SansSerif,
         fontWeight = FontWeight.Medium,
         fontSize = 16.sp,
         lineHeight = 22.sp
     ),
+    titleSmall = TextStyle(
+        fontFamily = FontFamily.SansSerif,
+        fontWeight = FontWeight.Medium,
+        fontSize = 14.sp,
+        lineHeight = 20.sp
+    ),
     bodyLarge = TextStyle(
-        fontFamily = AppFont,
+        fontFamily = FontFamily.SansSerif,
         fontWeight = FontWeight.Normal,
         fontSize = 16.sp,
         lineHeight = 24.sp
     ),
     bodyMedium = TextStyle(
-        fontFamily = AppFont,
+        fontFamily = FontFamily.SansSerif,
         fontWeight = FontWeight.Normal,
         fontSize = 14.sp,
         lineHeight = 22.sp
     ),
     bodySmall = TextStyle(
-        fontFamily = AppFont,
+        fontFamily = FontFamily.SansSerif,
         fontWeight = FontWeight.Normal,
         fontSize = 12.sp,
         lineHeight = 18.sp
     ),
     labelLarge = TextStyle(
-        fontFamily = AppFont,
+        fontFamily = FontFamily.SansSerif,
         fontWeight = FontWeight.SemiBold,
-        fontSize = 14.sp,
+        fontSize = 13.sp,
         lineHeight = 18.sp
     ),
     labelMedium = TextStyle(
-        fontFamily = AppFont,
-        fontWeight = FontWeight.Medium,
+        fontFamily = FontFamily.SansSerif,
+        fontWeight = FontWeight.SemiBold,
         fontSize = 12.sp,
         lineHeight = 16.sp
+    ),
+    labelSmall = TextStyle(
+        fontFamily = FontFamily.SansSerif,
+        fontWeight = FontWeight.Medium,
+        fontSize = 11.sp,
+        lineHeight = 14.sp
     )
 )
