@@ -14,7 +14,6 @@ android {
         targetSdk = 34
         versionCode = 1
         versionName = "1.0"
-
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 
         vectorDrawables {
@@ -23,9 +22,7 @@ android {
     }
 
     buildTypes {
-        debug {
-            isMinifyEnabled = false
-        }
+        debug { isMinifyEnabled = false }
         release {
             isMinifyEnabled = false
             proguardFiles(
@@ -39,14 +36,9 @@ android {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
     }
+    kotlinOptions { jvmTarget = "17" }
 
-    kotlinOptions {
-        jvmTarget = "17"
-    }
-
-    buildFeatures {
-        compose = true
-    }
+    buildFeatures { compose = true }
 
     packaging {
         resources {
@@ -61,6 +53,9 @@ dependencies {
     implementation("androidx.lifecycle:lifecycle-runtime-ktx:2.8.4")
     implementation("androidx.activity:activity-compose:1.9.2")
 
+    /* ✅ Needed for Theme.MaterialComponents.* in XML */
+    implementation("com.google.android.material:material:1.12.0")
+
     /* Compose BOM */
     implementation(platform("androidx.compose:compose-bom:2024.09.00"))
     androidTestImplementation(platform("androidx.compose:compose-bom:2024.09.00"))
@@ -72,7 +67,7 @@ dependencies {
     /* Material 3 (Compose) */
     implementation("androidx.compose.material3:material3")
 
-    /* ✅ Material 3 Android theme resources (fixes Theme.Material3.* not found) */
+    /* (Optional) can keep this; harmless even if it wasn’t solving XML themes */
     implementation("androidx.compose.material3:material3-android")
 
     /* Icons */
