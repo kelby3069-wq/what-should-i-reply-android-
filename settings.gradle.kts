@@ -14,5 +14,5 @@ dependencyResolutionManagement {
     }
 }
 
-rootProject.name = "ReplySense"
+rootProject.name = "what-should-i-reply-android-"
 include(":app")
