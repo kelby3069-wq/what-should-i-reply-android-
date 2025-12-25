@@ -13,9 +13,7 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
-import androidx.compose.ui.graphics.BlendMode
-import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.graphics.*
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.unit.dp
@@ -29,7 +27,6 @@ fun CropperDialog(
     onCancel: () -> Unit,
     onConfirm: (Bitmap) -> Unit
 ) {
-    // Normalized crop rect
     var leftN by remember { mutableFloatStateOf(0.05f) }
     var topN by remember { mutableFloatStateOf(0.15f) }
     var rightN by remember { mutableFloatStateOf(0.95f) }
@@ -39,14 +36,15 @@ fun CropperDialog(
         onDismissRequest = onCancel,
         title = { Text(title) },
         text = {
-            Column(Modifier.fillMaxWidth()) {
-                Text("Drag box to chat area. Drag corners to resize.")
+            Column {
+                Text("Drag the box to the chat area. Drag corners to resize.")
                 Spacer(Modifier.height(10.dp))
+
                 Box(
-                    modifier = Modifier
+                    Modifier
                         .fillMaxWidth()
                         .height(420.dp)
-                        .background(Color(0xFF111111))
+                        .background(Color.Black)
                 ) {
                     CropCanvas(
                         bitmap = bitmap,
@@ -66,7 +64,9 @@ fun CropperDialog(
         },
         confirmButton = {
             Button(onClick = {
-                onConfirm(cropBitmapNormalized(bitmap, leftN, topN, rightN, bottomN))
+                onConfirm(
+                    cropBitmapNormalized(bitmap, leftN, topN, rightN, bottomN)
+                )
             }) { Text("Use crop") }
         },
         dismissButton = {
@@ -84,77 +84,69 @@ private fun CropCanvas(
     bottomN: Float,
     onRectChange: (Float, Float, Float, Float) -> Unit
 ) {
-    // Float-only constants
-    val handleHitRadius = 28f
     val borderWidth = 4f
-    val handleDotRadius = 10f
+    val handleRadius = 10f
     val minSizePx = 36f
+
+    val image = remember(bitmap) { bitmap.asImageBitmap() }
 
     Canvas(
         modifier = Modifier
             .fillMaxSize()
             .pointerInput(Unit) {
-                detectDragGestures { change, dragAmount ->
+                detectDragGestures { change, drag ->
                     change.consume()
 
-                    val w = size.width.coerceAtLeast(1f)
-                    val h = size.height.coerceAtLeast(1f)
+                    val w = size.width
+                    val h = size.height
 
-                    // current rect in px
                     val left = leftN * w
                     val top = topN * h
                     val right = rightN * w
                     val bottom = bottomN * h
 
                     val p = change.position
-                    val tl = Offset(left, top)
-                    val br = Offset(right, bottom)
+                    val nearTL = dist(p, Offset(left, top)) < 30f
+                    val nearBR = dist(p, Offset(right, bottom)) < 30f
+                    val inside =
+                        p.x in left..right && p.y in top..bottom
 
-                    val nearTL = manhattan(p, tl) <= handleHitRadius
-                    val nearBR = manhattan(p, br) <= handleHitRadius
-                    val inside = p.x >= left && p.x <= right && p.y >= top && p.y <= bottom
-
-                    val dx = dragAmount.x
-                    val dy = dragAmount.y
-
-                    var newLeft = left
-                    var newTop = top
-                    var newRight = right
-                    var newBottom = bottom
+                    var nl = left
+                    var nt = top
+                    var nr = right
+                    var nb = bottom
 
                     when {
                         nearTL -> {
-                            newLeft = (left + dx).coerceIn(0f, right - minSizePx)
-                            newTop = (top + dy).coerceIn(0f, bottom - minSizePx)
+                            nl = (left + drag.x).coerceIn(0f, right - minSizePx)
+                            nt = (top + drag.y).coerceIn(0f, bottom - minSizePx)
                         }
                         nearBR -> {
-                            newRight = (right + dx).coerceIn(left + minSizePx, w)
-                            newBottom = (bottom + dy).coerceIn(top + minSizePx, h)
+                            nr = (right + drag.x).coerceIn(left + minSizePx, w)
+                            nb = (bottom + drag.y).coerceIn(top + minSizePx, h)
                         }
                         inside -> {
-                            val rectW = (right - left).coerceAtLeast(minSizePx)
-                            val rectH = (bottom - top).coerceAtLeast(minSizePx)
-
-                            newLeft = (left + dx).coerceIn(0f, w - rectW)
-                            newTop = (top + dy).coerceIn(0f, h - rectH)
-                            newRight = newLeft + rectW
-                            newBottom = newTop + rectH
+                            val rw = right - left
+                            val rh = bottom - top
+                            nl = (left + drag.x).coerceIn(0f, w - rw)
+                            nt = (top + drag.y).coerceIn(0f, h - rh)
+                            nr = nl + rw
+                            nb = nt + rh
                         }
                         else -> return@detectDragGestures
                     }
 
-                    // back to normalized
                     onRectChange(
-                        (newLeft / w).coerceIn(0f, 1f),
-                        (newTop / h).coerceIn(0f, 1f),
-                        (newRight / w).coerceIn(0f, 1f),
-                        (newBottom / h).coerceIn(0f, 1f)
+                        (nl / w).coerceIn(0f, 1f),
+                        (nt / h).coerceIn(0f, 1f),
+                        (nr / w).coerceIn(0f, 1f),
+                        (nb / h).coerceIn(0f, 1f)
                     )
                 }
             }
     ) {
-        // image
-        drawImage(bitmap.asImageBitmap())
+        // ✅ SAFE overload — NO Ints involved
+        drawImage(image)
 
         val w = size.width
         val h = size.height
@@ -164,29 +156,36 @@ private fun CropCanvas(
         val right = rightN * w
         val bottom = bottomN * h
 
-        // dim outside
+        // Dim outside
         drawRect(Color(0x88000000), size = size)
 
-        // clear inside crop
+        // Clear crop area
         drawRect(
             color = Color.Transparent,
             topLeft = Offset(left, top),
-            size = Size((right - left).coerceAtLeast(1f), (bottom - top).coerceAtLeast(1f)),
+            size = Size(
+                (right - left).coerceAtLeast(1f),
+                (bottom - top).coerceAtLeast(1f)
+            ),
             blendMode = BlendMode.Clear
         )
 
-        // border
+        // Border
         drawRect(
             color = Color.White,
             topLeft = Offset(left, top),
-            size = Size((right - left).coerceAtLeast(1f), (bottom - top).coerceAtLeast(1f)),
-            style = Stroke(width = borderWidth)
+            size = Size(
+                (right - left).coerceAtLeast(1f),
+                (bottom - top).coerceAtLeast(1f)
+            ),
+            style = Stroke(borderWidth)
         )
 
-        // handles
-        drawCircle(Color.White, radius = handleDotRadius, center = Offset(left, top))
-        drawCircle(Color.White, radius = handleDotRadius, center = Offset(right, bottom))
+        // Handles
+        drawCircle(Color.White, handleRadius, Offset(left, top))
+        drawCircle(Color.White, handleRadius, Offset(right, bottom))
     }
 }
 
-private fun manhattan(a: Offset, b: Offset): Float = abs(a.x - b.x) + abs(a.y - b.y)
+private fun dist(a: Offset, b: Offset): Float =
+    abs(a.x - b.x) + abs(a.y - b.y)
