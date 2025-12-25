@@ -5,32 +5,37 @@ plugins {
 
 android {
     namespace = "com.replysense.app"
-    compileSdk = 34
+    compileSdk = 35
 
     defaultConfig {
         applicationId = "com.replysense.app"
         minSdk = 24
-        targetSdk = 34
+        targetSdk = 35
         versionCode = 1
         versionName = "1.0"
-        testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 
-        vectorDrawables {
-            useSupportLibrary = true
-        }
+        // These MUST be valid Kotlin/Java string literals.
+        // API key defaults to empty so CI compiles without secrets.
+        buildConfigField(
+            "String",
+            "API_BASE_URL",
+            "\"https://example.com\""
+        )
+        buildConfigField(
+            "String",
+            "API_KEY",
+            "\"\""
+        )
     }
 
-    buildTypes {
-        release {
-            isMinifyEnabled = false
-            proguardFiles(
-                getDefaultProguardFile("proguard-android-optimize.txt"),
-                "proguard-rules.pro"
-            )
-        }
-        debug {
-            isMinifyEnabled = false
-        }
+    buildFeatures {
+        compose = true
+        buildConfig = true
+    }
+
+    composeOptions {
+        // Stable with Kotlin 2.x + AGP 8.x via Compose BOM + compiler extension
+        kotlinCompilerExtensionVersion = "1.5.14"
     }
 
     compileOptions {
@@ -42,29 +47,27 @@ android {
         jvmTarget = "17"
     }
 
-    buildFeatures {
-        viewBinding = true
-    }
-
     packaging {
-        resources.excludes.addAll(
-            listOf(
-                "/META-INF/{AL2.0,LGPL2.1}"
-            )
-        )
+        resources {
+            excludes += "/META-INF/{AL2.0,LGPL2.1}"
+        }
     }
 }
 
 dependencies {
-    implementation("androidx.core:core-ktx:1.13.1")
-    implementation("androidx.appcompat:appcompat:1.7.0")
+    // Compose BOM
+    val composeBom = platform("androidx.compose:compose-bom:2024.10.00")
+    implementation(composeBom)
+    androidTestImplementation(composeBom)
 
-    // ✅ This is the missing piece that provides Theme.Material3.*
-    implementation("com.google.android.material:material:1.12.0")
+    implementation("androidx.activity:activity-compose:1.9.3")
+    implementation("androidx.compose.ui:ui")
+    implementation("androidx.compose.ui:ui-tooling-preview")
+    debugImplementation("androidx.compose.ui:ui-tooling")
 
-    implementation("androidx.constraintlayout:constraintlayout:2.1.4")
+    implementation("androidx.compose.material3:material3")
+    implementation("androidx.lifecycle:lifecycle-runtime-ktx:2.8.7")
 
-    testImplementation("junit:junit:4.13.2")
-    androidTestImplementation("androidx.test.ext:junit:1.2.1")
-    androidTestImplementation("androidx.test.espresso:espresso-core:3.6.1")
+    // Optional networking (safe to keep even if unused right now)
+    implementation("com.squareup.okhttp3:okhttp:4.12.0")
 }
