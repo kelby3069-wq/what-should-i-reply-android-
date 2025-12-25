@@ -1,7 +1,7 @@
 plugins {
     id("com.android.application")
-    kotlin("android")
-    kotlin("plugin.serialization")
+    id("org.jetbrains.kotlin.android")
+    id("org.jetbrains.kotlin.plugin.serialization")
     id("com.google.devtools.ksp")
 }
 
@@ -21,7 +21,7 @@ android {
         compose = true
     }
 
-    // Kotlin 2.x + Compose: use compose compiler extension
+    // Kotlin 1.9.x + Compose: standard compose compiler extension works (no extra plugin required)
     composeOptions {
         kotlinCompilerExtensionVersion = "1.5.14"
     }
@@ -58,16 +58,16 @@ dependencies {
     // ViewModel
     implementation("androidx.lifecycle:lifecycle-viewmodel-compose:2.8.4")
 
-    // Coroutines
-    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.8.1")
-
-    // OkHttp
+    // Networking
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
 
     // Kotlinx Serialization
     implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.7.3")
 
-    // Room (if you still have DB code)
+    // Coroutines
+    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.8.1")
+
+    // Room (only if DB code exists)
     implementation("androidx.room:room-runtime:2.6.1")
     implementation("androidx.room:room-ktx:2.6.1")
     ksp("androidx.room:room-compiler:2.6.1")
