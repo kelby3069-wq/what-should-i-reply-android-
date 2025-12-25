@@ -14,5 +14,5 @@ dependencyResolutionManagement {
     }
 }
 
-rootProject.name = "DeadlockOCRBaseline"
+rootProject.name = "ReplySense"
 include(":app")
