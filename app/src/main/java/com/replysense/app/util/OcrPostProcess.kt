@@ -2,10 +2,14 @@ package com.replysense.app.util
 
 object OcrPostProcess {
 
+    enum class Dir { THEM, ME }
+
     data class Msg(
+        val id: Int,
         val ts: String? = null,
         val speaker: String? = null,
-        val text: String
+        val text: String,
+        val dir: Dir = Dir.THEM
     )
 
     data class Processed(
@@ -32,16 +36,19 @@ object OcrPostProcess {
 
         val filtered = lines.filter { line ->
             if (!threadOnly) return@filter true
-            // Thread-only mode: keep only stuff that looks like chat text
             looksLikeChatContent(line)
         }
 
         val merged = if (!mergeLines) filtered else mergeChatLines(filtered)
 
-        val msgs = splitIntoMessages(merged)
+        // Default everything to THEM (safer for “generate reply” UX).
+        val msgs = merged
+            .mapIndexed { idx, line -> lineToMsg(idx, line) }
+            .filter { it.text.isNotBlank() }
 
         val transcript = msgs.joinToString("\n") { m ->
             buildString {
+                append(if (m.dir == Dir.THEM) "THEM: " else "ME: ")
                 if (m.ts != null) append("[${m.ts}] ")
                 if (m.speaker != null) append("${m.speaker}: ")
                 append(m.text)
@@ -58,22 +65,44 @@ object OcrPostProcess {
         )
     }
 
+    fun toggleDir(list: List<Msg>, id: Int): List<Msg> =
+        list.map { m ->
+            if (m.id != id) m
+            else m.copy(dir = if (m.dir == Dir.THEM) Dir.ME else Dir.THEM)
+        }
+
+    fun lastIncomingText(messages: List<Msg>): String? =
+        messages.lastOrNull { it.dir == Dir.THEM }?.text
+
+    // ---------- Parsing ----------
+
+    private fun lineToMsg(id: Int, line: String): Msg {
+        val m = Regex("""^(.*\b\d{1,2}:\d{2}\s?(AM|PM)\b)\s+(.*)$""", RegexOption.IGNORE_CASE)
+            .find(line)
+        return if (m != null) {
+            Msg(
+                id = id,
+                ts = m.groupValues[1].trim(),
+                text = m.groupValues[3].trim(),
+                dir = Dir.THEM
+            )
+        } else {
+            Msg(id = id, text = line.trim(), dir = Dir.THEM)
+        }
+    }
+
     // ---------- Cleaning ----------
 
     private fun normalizeLine(s: String): String? {
         val t = s.trim()
 
-        // Hard drop common UI / OCR junk
         if (t.length <= 1) return null
         if (isKeyboardRow(t)) return null
         if (isOnlyNumbersOrSpacedNumbers(t)) return null
         if (isUiChrome(t)) return null
 
-        // Compress repeated spaces
         val cleaned = t.replace(Regex("\\s{2,}"), " ").trim()
         if (cleaned.isBlank()) return null
-
-        // Drop lines that are basically random caps fragments (but keep real acronyms inside sentences)
         if (looksLikeGibberishCaps(cleaned)) return null
 
         return cleaned
@@ -86,7 +115,6 @@ object OcrPostProcess {
             "message",
             "english (us)",
             "search",
-            "watch",
             "today",
             "yesterday"
         )
@@ -99,23 +127,16 @@ object OcrPostProcess {
     }
 
     private fun isOnlyNumbersOrSpacedNumbers(t: String): Boolean {
-        // "1 2 3 4 5" or "12345"
         val stripped = t.replace(" ", "")
         if (stripped.isEmpty()) return false
         return stripped.all { it.isDigit() }
     }
 
     private fun isKeyboardRow(t: String): Boolean {
-        // Typical OCR of on-screen keyboard rows
         val low = t.lowercase().replace(" ", "")
-        val keyboardPatterns = listOf(
-            "qwertyuiop",
-            "asdfghjkl",
-            "zxcvbnm"
-        )
+        val keyboardPatterns = listOf("qwertyuiop", "asdfghjkl", "zxcvbnm")
         if (keyboardPatterns.any { low.contains(it) }) return true
 
-        // Also reject mostly single-letter tokens like: "Q WE RTY U" or "A S D"
         val tokens = t.split(Regex("\\s+")).filter { it.isNotBlank() }
         if (tokens.size >= 4 && tokens.all { it.length <= 2 && it.any { c -> c.isLetter() } }) {
             val lettersOnly = tokens.joinToString("") { it.filter { c -> c.isLetter() } }.lowercase()
@@ -125,17 +146,13 @@ object OcrPostProcess {
     }
 
     private fun looksLikeGibberishCaps(t: String): Boolean {
-        // If line is mostly caps tokens with little vowel/space structure, it's likely UI/keyboard OCR.
-        // Keep normal sentences even if they contain acronyms.
         val tokens = t.split(Regex("\\s+")).filter { it.isNotBlank() }
         if (tokens.size < 4) return false
 
         val capLike = tokens.count { tok ->
             tok.length in 1..3 && tok.all { it.isLetter() } && tok == tok.uppercase()
         }
-        if (capLike >= tokens.size - 1) return true
-
-        return false
+        return capLike >= tokens.size - 1
     }
 
     // ---------- Chat detection & merging ----------
@@ -147,7 +164,6 @@ object OcrPostProcess {
         if (isOnlyNumbersOrSpacedNumbers(t)) return false
         if (isUiChrome(t)) return false
 
-        // looks like a sentence-ish line
         val hasSpace = t.contains(' ')
         val hasLetters = t.any { it.isLetter() }
         val hasPunct = t.any { it in ".?!," }
@@ -168,23 +184,19 @@ object OcrPostProcess {
         }
 
         for (line in lines) {
-            // If line looks like a timestamp header, split
             if (looksLikeTimestamp(line) && buffer.isNotEmpty()) {
                 flush()
                 buffer.append(line)
                 continue
             }
 
-            // If buffer empty, start
             if (buffer.isEmpty()) {
                 buffer.append(line)
                 continue
             }
 
-            // Join “continuation lines” into same message
             val prev = buffer.toString()
-            val shouldJoin =
-                !looksLikeNewMessageBoundary(prev, line)
+            val shouldJoin = !looksLikeNewMessageBoundary(prev, line)
 
             if (shouldJoin) {
                 buffer.append(' ')
@@ -198,39 +210,16 @@ object OcrPostProcess {
         return out
     }
 
-    private fun looksLikeTimestamp(line: String): Boolean {
-        // crude: "12:38 AM", "7:05 PM"
-        return Regex("""\b\d{1,2}:\d{2}\s?(AM|PM)\b""", RegexOption.IGNORE_CASE).containsMatchIn(line)
-    }
+    private fun looksLikeTimestamp(line: String): Boolean =
+        Regex("""\b\d{1,2}:\d{2}\s?(AM|PM)\b""", RegexOption.IGNORE_CASE).containsMatchIn(line)
 
     private fun looksLikeNewMessageBoundary(prev: String, next: String): Boolean {
-        // boundary if next starts like a new thought or a timestamp
         if (looksLikeTimestamp(next)) return true
-        // boundary if next is very long and prev ends with punctuation (new msg often follows)
         if (prev.trim().lastOrNull() in listOf('.', '!', '?') && next.length >= 10) return true
         return false
     }
 
-    // ---------- Split into messages ----------
-
-    private fun splitIntoMessages(lines: List<String>): List<Msg> {
-        if (lines.isEmpty()) return emptyList()
-
-        // Basic approach: each merged line becomes a message,
-        // but if it contains a timestamp + text, we keep it as one message anyway.
-        return lines.map { line ->
-            // Try extract timestamp if present
-            val m = Regex("""^(.*\b\d{1,2}:\d{2}\s?(AM|PM)\b)\s+(.*)$""", RegexOption.IGNORE_CASE)
-                .find(line)
-            if (m != null) {
-                val ts = m.groupValues[1].trim()
-                val txt = m.groupValues[3].trim()
-                Msg(ts = ts, text = txt)
-            } else {
-                Msg(text = line.trim())
-            }
-        }.filter { it.text.isNotBlank() }
-    }
+    // ---------- JSON ----------
 
     private fun msgsToJson(msgs: List<Msg>): String {
         fun esc(s: String) = s
@@ -241,7 +230,7 @@ object OcrPostProcess {
         val items = msgs.joinToString(",") { m ->
             val ts = m.ts?.let { "\"ts\":\"${esc(it)}\"," } ?: ""
             val sp = m.speaker?.let { "\"speaker\":\"${esc(it)}\"," } ?: ""
-            """{${ts}${sp}"text":"${esc(m.text)}"}"""
+            """{"id":${m.id},"dir":"${m.dir.name}",${ts}${sp}"text":"${esc(m.text)}"}"""
         }
         return "[$items]"
     }
