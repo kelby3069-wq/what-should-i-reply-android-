@@ -38,7 +38,7 @@ android {
 
     buildFeatures {
         compose = true
-        // ✅ This fixes "Unresolved reference BuildConfig"
+        // BuildConfig needed because legacy code references it
         buildConfig = true
     }
 
@@ -70,8 +70,12 @@ dependencies {
     debugImplementation("androidx.compose.ui:ui-tooling")
     debugImplementation("androidx.compose.ui:ui-test-manifest")
 
-    // ✅ Required because your XML theme parent is Theme.Material3.*
+    // Provides Theme.Material3.* XML parents for themes.xml
     implementation("com.google.android.material:material:1.13.0")
 
+    // Needed for StateFlow/MutableStateFlow used by the baseline ViewModel stub
+    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.10.2")
+
+    // ML Kit OCR
     implementation("com.google.mlkit:text-recognition:16.0.1")
 }
