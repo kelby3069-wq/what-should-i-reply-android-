@@ -28,7 +28,6 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
-import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.rememberTopAppBarState
@@ -56,7 +55,7 @@ class MainActivity : ComponentActivity() {
     }
 }
 
-private enum class VibeMode { AUTO, MANUAL }
+private data class VibeChoice(val label: String, val value: String)
 
 @OptIn(ExperimentalMaterial3Api::class)
 @androidx.compose.runtime.Composable
@@ -70,13 +69,21 @@ private fun ReplySenseScreen() {
     var input by remember { mutableStateOf("") }
     var context by remember { mutableStateOf("") }
 
-    val vibes = remember {
-        listOf("neutral", "friendly", "flirty", "professional", "apology", "tough-love", "troll")
+    // ✅ Auto is the default. If user picks anything else, it becomes manual automatically.
+    val vibeChoices = remember {
+        listOf(
+            VibeChoice("Auto (recommended)", "auto"),
+            VibeChoice("Neutral", "neutral"),
+            VibeChoice("Friendly", "friendly"),
+            VibeChoice("Flirty", "flirty"),
+            VibeChoice("Professional", "professional"),
+            VibeChoice("Apology", "apology"),
+            VibeChoice("Tough-love", "tough-love"),
+            VibeChoice("Troll", "troll")
+        )
     }
 
-    // ✅ Auto-vibe default
-    var vibeMode by remember { mutableStateOf(VibeMode.AUTO) }
-    var selectedVibe by remember { mutableStateOf(vibes.first()) }
+    var selectedVibe by remember { mutableStateOf(vibeChoices.first()) }
     var vibeMenuOpen by remember { mutableStateOf(false) }
 
     var loading by remember { mutableStateOf(false) }
@@ -122,119 +129,77 @@ private fun ReplySenseScreen() {
                 minLines = 2
             )
 
-            // Vibe mode row
-            Card(modifier = Modifier.fillMaxWidth()) {
-                Row(
-                    modifier = Modifier.padding(14.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.SpaceBetween
+            // Single dropdown with Auto as the first/default choice
+            Column(modifier = Modifier.fillMaxWidth()) {
+                Text("Vibe", style = MaterialTheme.typography.labelLarge)
+                Spacer(Modifier.height(6.dp))
+                Card(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable { vibeMenuOpen = true }
                 ) {
-                    Column(modifier = Modifier.weight(1f)) {
-                        Text("Vibe", style = MaterialTheme.typography.labelLarge)
-                        Text(
-                            if (vibeMode == VibeMode.AUTO) "AUTO (Worker decides)" else "MANUAL (you pick)",
-                            style = MaterialTheme.typography.labelMedium
-                        )
+                    Row(
+                        modifier = Modifier.padding(14.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(selectedVibe.label)
                     }
-                    Switch(
-                        checked = (vibeMode == VibeMode.MANUAL),
-                        onCheckedChange = { checked ->
-                            vibeMode = if (checked) VibeMode.MANUAL else VibeMode.AUTO
-                        }
-                    )
                 }
 
-                if (vibeMode == VibeMode.MANUAL) {
-                    Spacer(Modifier.height(8.dp))
-                    Card(
-                        modifier = Modifier
-                            .padding(start = 14.dp, end = 14.dp, bottom = 14.dp)
-                            .fillMaxWidth()
-                            .clickable { vibeMenuOpen = true }
-                    ) {
-                        Row(
-                            modifier = Modifier.padding(14.dp),
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Text(selectedVibe)
-                        }
+                DropdownMenu(expanded = vibeMenuOpen, onDismissRequest = { vibeMenuOpen = false }) {
+                    vibeChoices.forEach { choice ->
+                        DropdownMenuItem(
+                            text = { Text(choice.label) },
+                            onClick = {
+                                selectedVibe = choice
+                                vibeMenuOpen = false
+                            }
+                        )
                     }
-
-                    DropdownMenu(expanded = vibeMenuOpen, onDismissRequest = { vibeMenuOpen = false }) {
-                        vibes.forEach { v ->
-                            DropdownMenuItem(
-                                text = { Text(v) },
-                                onClick = {
-                                    selectedVibe = v
-                                    vibeMenuOpen = false
-                                }
-                            )
-                        }
-                    }
-                } else {
-                    // In AUTO mode, show allowed vibes (optional hint)
-                    Text(
-                        modifier = Modifier.padding(start = 14.dp, end = 14.dp, bottom = 14.dp),
-                        text = "Auto can choose from: ${vibes.joinToString()}",
-                        style = MaterialTheme.typography.labelSmall
-                    )
                 }
             }
 
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(12.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Button(
-                    onClick = {
-                        if (input.isBlank()) {
-                            error = "Paste something first."
-                            return@Button
-                        }
-                        loading = true
-                        options = emptyList()
+            Button(
+                onClick = {
+                    if (input.isBlank()) {
+                        error = "Paste something first."
+                        return@Button
+                    }
+                    loading = true
+                    options = emptyList()
 
-                        scope.launch {
-                            try {
-                                val vibeToSend =
-                                    if (vibeMode == VibeMode.AUTO) "auto" else selectedVibe
+                    scope.launch {
+                        try {
+                            val req = ReplyRequest(
+                                text = input.trim(),
+                                vibe = selectedVibe.value, // "auto" or manual vibe
+                                context = context.trim().ifBlank { null },
+                                platform = "android"
+                            )
 
-                                val req = ReplyRequest(
-                                    text = input.trim(),
-                                    vibe = vibeToSend,
-                                    context = context.trim().ifBlank { null },
-                                    platform = "android",
-                                    vibesAllowed = if (vibeMode == VibeMode.AUTO) vibes else null
-                                )
-
-                                val resp = api.generateReplies(req)
-                                val list = resp.allOptions()
-                                if (list.isEmpty()) {
-                                    error = "No options returned. (Parsed OK, empty list.)"
-                                }
-                                options = list
-                            } catch (t: Throwable) {
-                                error = t.message ?: "Request failed"
-                            } finally {
-                                loading = false
+                            val resp = api.generateReplies(req)
+                            val list = resp.allOptions()
+                            if (list.isEmpty()) {
+                                error = "No options returned. (Parsed OK, empty list.)"
                             }
+                            options = list
+                        } catch (t: Throwable) {
+                            error = t.message ?: "Request failed"
+                        } finally {
+                            loading = false
                         }
-                    },
-                    enabled = !loading,
-                    modifier = Modifier.weight(1f)
-                ) {
-                    if (loading) CircularProgressIndicator(modifier = Modifier.height(18.dp))
-                    else Text("Generate")
-                }
+                    }
+                },
+                enabled = !loading,
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                if (loading) CircularProgressIndicator(modifier = Modifier.height(18.dp))
+                else Text("Generate")
             }
 
             Divider()
 
-            Text(
-                "Tap an option to copy.",
-                style = MaterialTheme.typography.labelMedium
-            )
+            Text("Tap an option to copy.", style = MaterialTheme.typography.labelMedium)
 
             LazyColumn(
                 modifier = Modifier.fillMaxSize(),
