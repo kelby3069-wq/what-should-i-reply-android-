@@ -2,8 +2,13 @@ package com.replysense.app.util
 
 import android.graphics.Rect
 import com.google.mlkit.vision.text.Text
+import kotlin.math.abs
+import kotlin.math.max
+import kotlin.math.min
 
 object OcrLayoutCluster {
+
+    enum class MySide { RIGHT, LEFT }
 
     data class LineBox(
         val text: String,
@@ -11,17 +16,18 @@ object OcrLayoutCluster {
     )
 
     /**
-     * Extract chat-ish messages by clustering OCR lines using bounding boxes.
+     * Extract messages by clustering OCR lines using bounding boxes.
      *
-     * - Filters bottom keyboard area + obvious junk lines
-     * - Sorts by top then left
-     * - Groups lines into message "bubbles" using vertical gaps and alignment changes
-     * - Auto-tags THEM vs ME by horizontal position (right side = ME)
+     * Improvements:
+     * - Drops bottom keyboard zone by position
+     * - Clusters into bubbles using vertical gap + alignment + dir changes
+     * - Assigns ME/THEM using bubble geometry + user “my side” preference
      */
     fun extractMessages(
         result: Text,
         imageWidthPx: Int,
-        imageHeightPx: Int
+        imageHeightPx: Int,
+        mySide: MySide
     ): List<OcrPostProcess.Msg> {
         val w = imageWidthPx.coerceAtLeast(1)
         val h = imageHeightPx.coerceAtLeast(1)
@@ -34,10 +40,10 @@ object OcrLayoutCluster {
                 val t = line.text.trim()
                 if (t.isBlank()) continue
 
-                // 1) Drop bottom area (keyboard / input bar)
+                // Drop bottom area (keyboard / input bar)
                 if (box.top >= (h * 0.72f).toInt()) continue
 
-                // 2) Drop obvious garbage
+                // Drop obvious junk
                 if (t.length <= 1) continue
                 if (isUiChrome(t)) continue
                 if (isOnlyNumbersOrSpacedNumbers(t)) continue
@@ -50,75 +56,104 @@ object OcrLayoutCluster {
 
         if (lines.isEmpty()) return emptyList()
 
-        // Sort reading order-ish: top first, then left
+        // Sort: top then left
         lines.sortWith(compareBy<LineBox> { it.box.top }.thenBy { it.box.left })
 
-        // Thresholds (tuned for screenshots)
-        val gapPx = (h * 0.030f).toInt().coerceAtLeast(18)        // vertical gap to start new bubble
-        val alignJumpPx = (w * 0.30f).toInt().coerceAtLeast(140)  // left edge shift indicating other side
+        // Thresholds
+        val gapPx = (h * 0.030f).toInt().coerceAtLeast(18)
         val minorGapPx = (h * 0.015f).toInt().coerceAtLeast(10)
+        val alignJumpPx = (w * 0.26f).toInt().coerceAtLeast(120)
 
-        val msgs = mutableListOf<OcrPostProcess.Msg>()
-        var cur = StringBuilder()
-        var curBox = Rect(lines.first().box)
-        var curDir = dirFromBox(lines.first().box, w)
+        // Build bubble clusters
+        data class Bubble(var rect: Rect, val parts: MutableList<LineBox>)
 
-        fun flush() {
-            val text = cur.toString().trim()
-            if (text.isNotBlank()) {
-                msgs += OcrPostProcess.Msg(
-                    id = msgs.size,
-                    text = text,
-                    dir = curDir
-                )
-            }
-            cur = StringBuilder()
+        val bubbles = mutableListOf<Bubble>()
+        var cur = Bubble(Rect(lines.first().box), mutableListOf(lines.first()))
+
+        fun flushBubble() {
+            if (cur.parts.isNotEmpty()) bubbles += cur
         }
-
-        fun startNew(lb: LineBox) {
-            flush()
-            cur.append(lb.text)
-            curBox = Rect(lb.box)
-            curDir = dirFromBox(lb.box, w)
-        }
-
-        // Seed
-        cur.append(lines.first().text)
 
         for (i in 1 until lines.size) {
-            val prev = curBox
-            val next = lines[i].box
-            val nextText = lines[i].text
+            val prevRect = cur.rect
+            val next = lines[i]
+            val nextRect = next.box
 
-            val vGap = next.top - prev.bottom
-            val leftShift = kotlin.math.abs(next.left - prev.left)
-            val nextDir = dirFromBox(next, w)
+            val vGap = nextRect.top - prevRect.bottom
+            val leftShift = abs(nextRect.left - prevRect.left)
 
+            // provisional dir changes can suggest boundary, but we do it after bubble is built;
+            // we approximate boundary here using alignment and vertical gap.
             val newBubble =
                 vGap >= gapPx ||
-                (leftShift >= alignJumpPx && vGap >= minorGapPx) ||
-                (nextDir != curDir && vGap >= minorGapPx)
+                (leftShift >= alignJumpPx && vGap >= minorGapPx)
 
             if (newBubble) {
-                startNew(lines[i])
+                flushBubble()
+                cur = Bubble(Rect(nextRect), mutableListOf(next))
             } else {
-                // Same bubble → append as continuation
-                cur.append(' ')
-                cur.append(nextText)
-                curBox.union(next)
+                cur.parts += next
+                cur.rect.union(nextRect)
             }
         }
+        flushBubble()
 
-        flush()
+        // Assign direction per bubble using geometry
+        val msgs = bubbles.mapIndexed { idx, b ->
+            val text = b.parts.joinToString(" ") { it.text }.trim()
+            val dir = bubbleDir(b.rect, w, mySide)
+
+            OcrPostProcess.Msg(
+                id = idx,
+                text = text,
+                dir = dir
+            )
+        }.filter { it.text.isNotBlank() }
+
         return msgs
     }
 
-    private fun dirFromBox(box: Rect, w: Int): OcrPostProcess.Dir {
-        val cx = box.exactCenterX()
-        return if (cx > w * 0.56f) OcrPostProcess.Dir.ME else OcrPostProcess.Dir.THEM
+    /**
+     * Better ME/THEM classifier:
+     * - Uses bubble center relative to screen
+     * - Uses bubble margins: who is closer to edge?
+     * - Uses bubble width: narrow right-aligned bubbles are often ME on messaging apps
+     */
+    private fun bubbleDir(rect: Rect, w: Int, mySide: MySide): OcrPostProcess.Dir {
+        val left = rect.left.toFloat()
+        val right = rect.right.toFloat()
+        val width = (right - left).coerceAtLeast(1f)
+        val cx = rect.exactCenterX()
+
+        val leftMargin = left
+        val rightMargin = (w - right)
+
+        // Normalize
+        val cxNorm = cx / w.toFloat()
+        val widthNorm = width / w.toFloat()
+
+        val closerToRightEdge = rightMargin < leftMargin
+        val stronglyRight = cxNorm > 0.60f
+        val stronglyLeft = cxNorm < 0.40f
+
+        // Heuristic score: positive means RIGHT-side bubble
+        var score = 0.0f
+        if (closerToRightEdge) score += 1.0f else score -= 1.0f
+        if (stronglyRight) score += 1.0f
+        if (stronglyLeft) score -= 1.0f
+
+        // Narrow bubbles tend to be “typed” bubbles; give slight bias to edge closeness
+        if (widthNorm < 0.55f && closerToRightEdge) score += 0.5f
+        if (widthNorm < 0.55f && !closerToRightEdge) score -= 0.5f
+
+        val bubbleSideRight = score > 0f
+
+        val meIsRight = (mySide == MySide.RIGHT)
+        val isMe = if (meIsRight) bubbleSideRight else !bubbleSideRight
+        return if (isMe) OcrPostProcess.Dir.ME else OcrPostProcess.Dir.THEM
     }
 
-    // ---------- Light cleanup helpers (duplicated on purpose: fewer dependencies) ----------
+    // ---------- Cleanup helpers ----------
 
     private fun normalizeSpaces(s: String): String =
         s.replace(Regex("\\s{2,}"), " ").trim()
