@@ -5,11 +5,11 @@ plugins {
 }
 
 android {
-    namespace = "com.deadlock.app"
+    namespace = "com.replysense.app"
     compileSdk = 35
 
     defaultConfig {
-        applicationId = "com.deadlock.app"
+        applicationId = "com.replysense.app"
         minSdk = 24
         targetSdk = 35
         versionCode = 1
@@ -57,7 +57,6 @@ android {
 }
 
 dependencies {
-    // Compose BOM (Dec '25 stable line)
     implementation(platform("androidx.compose:compose-bom:2025.12.00"))
     androidTestImplementation(platform("androidx.compose:compose-bom:2025.12.00"))
 
@@ -71,9 +70,6 @@ dependencies {
     debugImplementation("androidx.compose.ui:ui-tooling")
     debugImplementation("androidx.compose.ui:ui-test-manifest")
 
-    // ML Kit OCR (on-device)
+    // ML Kit OCR (Text Recognition)
     implementation("com.google.mlkit:text-recognition:16.0.1")
-
-    // For loading Bitmaps from a content Uri
-    implementation("androidx.core:core-ktx:1.16.0")
 }
