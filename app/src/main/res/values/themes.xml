@@ -1,14 +1,18 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
 
-    <!-- Base application theme -->
+    <!-- Base app theme (Material 3, XML) -->
     <style name="Theme.ReplySense" parent="Theme.Material3.DayNight.NoActionBar">
-        <!-- No custom colors on purpose -->
-        <!-- This avoids missing md_theme_* resource crashes -->
+        <!-- Optional: basic brand colors (safe defaults if you don't have colors yet) -->
+        <item name="colorPrimary">@android:color/holo_blue_light</item>
+        <item name="colorOnPrimary">@android:color/white</item>
 
-        <!-- Optional but safe defaults -->
-        <item name="android:statusBarColor">?attr/colorSurface</item>
-        <item name="android:navigationBarColor">?attr/colorSurface</item>
+        <item name="colorSecondary">@android:color/holo_green_light</item>
+        <item name="colorOnSecondary">@android:color/black</item>
+
+        <!-- Status bar / navigation bar sanity -->
+        <item name="android:statusBarColor">@android:color/transparent</item>
+        <item name="android:navigationBarColor">@android:color/black</item>
     </style>
 
 </resources>
