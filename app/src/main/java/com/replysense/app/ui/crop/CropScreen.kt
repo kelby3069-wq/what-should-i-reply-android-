@@ -1,14 +1,18 @@
 package com.replysense.app.ui.crop
 
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.RectangleShape
+import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.graphics.ImageBitmap
+import androidx.compose.ui.graphics.RectangleShape
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.unit.dp
 import com.replysense.app.ui.theme.AppSpacing
@@ -16,25 +20,22 @@ import com.replysense.app.ui.theme.AppSpacing
 /**
  * Premium Crop Screen (visual-first).
  *
- * You provide:
- * - imageBitmap (the screenshot)
- * - callbacks for Cancel / Reset / Done
+ * - imageBitmap: screenshot to crop
+ * - onDone: returns normalized Rect [0..1] relative to the displayed image
  *
- * Crop rect is normalized (0..1) relative to the displayed image bounds.
- * This keeps it easy to map later into real pixel crop math.
+ * NOTE: This screen is “visual only”. Your existing crop math can map this rect later.
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun CropScreen(
     imageBitmap: ImageBitmap,
     onCancel: () -> Unit,
-    onDone: (rect: androidx.compose.ui.geometry.Rect) -> Unit,
+    onDone: (rect: Rect) -> Unit,
     modifier: Modifier = Modifier
 ) {
-    // Default: a nice centered crop that feels “smart”
     var rect by remember {
         mutableStateOf(
-            androidx.compose.ui.geometry.Rect(
+            Rect(
                 left = 0.08f,
                 top = 0.18f,
                 right = 0.92f,
@@ -43,9 +44,8 @@ fun CropScreen(
         )
     }
 
-    // Reset target: preserves aspect-ish feel, avoids tiny crops
     fun resetRect() {
-        rect = androidx.compose.ui.geometry.Rect(
+        rect = Rect(
             left = 0.08f,
             top = 0.18f,
             right = 0.92f,
@@ -62,7 +62,7 @@ fun CropScreen(
                 navigationIcon = {
                     IconButton(onClick = onCancel) {
                         Icon(
-                            imageVector = androidx.compose.material.icons.Icons.Default.ArrowBack,
+                            imageVector = Icons.Filled.ArrowBack,
                             contentDescription = "Back"
                         )
                     }
@@ -110,7 +110,6 @@ fun CropScreen(
                 .padding(horizontal = AppSpacing.screen, vertical = AppSpacing.lg),
             verticalArrangement = Arrangement.spacedBy(AppSpacing.lg)
         ) {
-            // Big “premium” crop stage
             Surface(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -126,15 +125,15 @@ fun CropScreen(
                         .clip(RectangleShape)
                         .background(MaterialTheme.colorScheme.surface)
                 ) {
-                    // Base layer: the screenshot itself
-                    androidx.compose.foundation.Image(
+                    // Base layer: screenshot image (never the app UI)
+                    Image(
                         bitmap = imageBitmap,
                         contentDescription = "Screenshot to crop",
                         modifier = Modifier.fillMaxSize(),
                         contentScale = ContentScale.Fit
                     )
 
-                    // Overlay layer: premium visual crop UI
+                    // Overlay: premium crop UI
                     PremiumCropOverlay(
                         modifier = Modifier.fillMaxSize(),
                         rect = rect,
@@ -144,7 +143,6 @@ fun CropScreen(
                 }
             }
 
-            // Subtext / instruction line (premium calm, not tutorial-y)
             Text(
                 text = "Drag to reposition. Reset if it gets weird.",
                 style = MaterialTheme.typography.bodyMedium,
