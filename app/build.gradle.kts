@@ -51,7 +51,6 @@ android {
 }
 
 dependencies {
-    // Compose BOM
     implementation(platform("androidx.compose:compose-bom:2025.12.00"))
     androidTestImplementation(platform("androidx.compose:compose-bom:2025.12.00"))
 
@@ -65,9 +64,8 @@ dependencies {
     debugImplementation("androidx.compose.ui:ui-tooling")
     debugImplementation("androidx.compose.ui:ui-test-manifest")
 
-    // ✅ REQUIRED for XML Theme.Material3.* parents (AAPT resource linking)
+    // ✅ This provides Theme.Material3.* XML themes for your themes.xml parent
     implementation("com.google.android.material:material:1.13.0")
 
-    // ML Kit OCR
     implementation("com.google.mlkit:text-recognition:16.0.1")
 }
