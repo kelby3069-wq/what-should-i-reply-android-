@@ -8,23 +8,13 @@ data class ReplyRequest(
     val text: String,
 
     /**
-     * If you support auto-vibe on the Worker:
-     * - Either send vibe="auto"
-     * - Or omit vibe entirely (make it nullable) and infer server-side.
-     *
-     * This client uses vibe="auto" when auto mode is enabled.
+     * Use "auto" to let the Worker choose vibe.
+     * Use a concrete vibe string (e.g., "friendly") if user selects one.
      */
     val vibe: String,
 
     val context: String? = null,
-    val platform: String? = "android",
-
-    /**
-     * Optional: if your Worker supports constraining auto-vibe.
-     * Safe even if ignored (we ignoreUnknownKeys on responses; requests are just JSON).
-     */
-    @SerialName("vibesAllowed")
-    val vibesAllowed: List<String>? = null
+    val platform: String? = "android"
 )
 
 @Serializable
