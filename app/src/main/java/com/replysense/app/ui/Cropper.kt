@@ -22,12 +22,6 @@ import androidx.compose.ui.unit.dp
 import com.replysense.app.cropBitmapNormalized
 import kotlin.math.abs
 
-/**
- * Simple crop dialog:
- * - Shows the image
- * - Draggable crop rectangle (move + resize via corners)
- * - Returns a cropped bitmap
- */
 @Composable
 fun CropperDialog(
     title: String,
@@ -72,8 +66,7 @@ fun CropperDialog(
         },
         confirmButton = {
             Button(onClick = {
-                val cropped = cropBitmapNormalized(bitmap, leftN, topN, rightN, bottomN)
-                onConfirm(cropped)
+                onConfirm(cropBitmapNormalized(bitmap, leftN, topN, rightN, bottomN))
             }) { Text("Use crop") }
         },
         dismissButton = {
@@ -91,11 +84,11 @@ private fun CropCanvas(
     bottomN: Float,
     onRectChange: (Float, Float, Float, Float) -> Unit
 ) {
-    // ✅ floats (Compose draw APIs want Float)
-    val handleRadius = 14f
+    // Float-only constants
+    val handleHitRadius = 28f
     val borderWidth = 4f
     val handleDotRadius = 10f
-    val minSizePx = 30f
+    val minSizePx = 36f
 
     Canvas(
         modifier = Modifier
@@ -107,17 +100,19 @@ private fun CropCanvas(
                     val w = size.width.coerceAtLeast(1f)
                     val h = size.height.coerceAtLeast(1f)
 
+                    // current rect in px
                     val left = leftN * w
                     val top = topN * h
                     val right = rightN * w
                     val bottom = bottomN * h
 
+                    val p = change.position
                     val tl = Offset(left, top)
                     val br = Offset(right, bottom)
 
-                    val p = change.position
-                    val nearTL = manhattan(p, tl) <= handleRadius * 2f
-                    val nearBR = manhattan(p, br) <= handleRadius * 2f
+                    val nearTL = manhattan(p, tl) <= handleHitRadius
+                    val nearBR = manhattan(p, br) <= handleHitRadius
+                    val inside = p.x >= left && p.x <= right && p.y >= top && p.y <= bottom
 
                     val dx = dragAmount.x
                     val dy = dragAmount.y
@@ -136,16 +131,19 @@ private fun CropCanvas(
                             newRight = (right + dx).coerceIn(left + minSizePx, w)
                             newBottom = (bottom + dy).coerceIn(top + minSizePx, h)
                         }
-                        p.x in left..right && p.y in top..bottom -> {
-                            val rectW = right - left
-                            val rectH = bottom - top
+                        inside -> {
+                            val rectW = (right - left).coerceAtLeast(minSizePx)
+                            val rectH = (bottom - top).coerceAtLeast(minSizePx)
+
                             newLeft = (left + dx).coerceIn(0f, w - rectW)
                             newTop = (top + dy).coerceIn(0f, h - rectH)
                             newRight = newLeft + rectW
                             newBottom = newTop + rectH
                         }
+                        else -> return@detectDragGestures
                     }
 
+                    // back to normalized
                     onRectChange(
                         (newLeft / w).coerceIn(0f, 1f),
                         (newTop / h).coerceIn(0f, 1f),
@@ -155,7 +153,7 @@ private fun CropCanvas(
                 }
             }
     ) {
-        // Draw image scaled to canvas
+        // image
         drawImage(bitmap.asImageBitmap())
 
         val w = size.width
@@ -166,26 +164,26 @@ private fun CropCanvas(
         val right = rightN * w
         val bottom = bottomN * h
 
-        // Dim outside area
+        // dim outside
         drawRect(Color(0x88000000), size = size)
 
-        // Punch out crop area
+        // clear inside crop
         drawRect(
             color = Color.Transparent,
             topLeft = Offset(left, top),
-            size = Size(right - left, bottom - top),
+            size = Size((right - left).coerceAtLeast(1f), (bottom - top).coerceAtLeast(1f)),
             blendMode = BlendMode.Clear
         )
 
-        // Crop rect border
+        // border
         drawRect(
             color = Color.White,
             topLeft = Offset(left, top),
-            size = Size(right - left, bottom - top),
+            size = Size((right - left).coerceAtLeast(1f), (bottom - top).coerceAtLeast(1f)),
             style = Stroke(width = borderWidth)
         )
 
-        // Handles
+        // handles
         drawCircle(Color.White, radius = handleDotRadius, center = Offset(left, top))
         drawCircle(Color.White, radius = handleDotRadius, center = Offset(right, bottom))
     }
