@@ -21,6 +21,7 @@ import androidx.compose.ui.unit.dp
 import com.google.mlkit.vision.common.InputImage
 import com.google.mlkit.vision.text.TextRecognition
 import com.google.mlkit.vision.text.latin.TextRecognizerOptions
+import java.util.Locale
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -45,14 +46,15 @@ private fun OcrScreen() {
 
     var selectedUri by remember { mutableStateOf<Uri?>(null) }
     var isWorking by remember { mutableStateOf(false) }
-    var resultText by remember { mutableStateOf("") }
+    var rawText by remember { mutableStateOf("") }
+    var showCleaned by remember { mutableStateOf(true) }
     var errorText by remember { mutableStateOf<String?>(null) }
 
     val pickImage = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.GetContent()
     ) { uri ->
         selectedUri = uri
-        resultText = ""
+        rawText = ""
         errorText = null
     }
 
@@ -71,7 +73,7 @@ private fun OcrScreen() {
     fun runOcr(uri: Uri) {
         isWorking = true
         errorText = null
-        resultText = ""
+        rawText = ""
 
         val bitmap = try {
             decodeBitmap(uri)
@@ -86,13 +88,20 @@ private fun OcrScreen() {
 
         recognizer.process(image)
             .addOnSuccessListener { visionText ->
-                resultText = visionText.text.trim().ifEmpty { "(No text found)" }
+                rawText = visionText.text.trim()
                 isWorking = false
             }
             .addOnFailureListener { e ->
                 errorText = "OCR failed: ${e.message ?: e.javaClass.simpleName}"
                 isWorking = false
             }
+    }
+
+    val displayText = remember(rawText, showCleaned) {
+        val t = rawText.trim()
+        if (t.isEmpty()) "(empty)"
+        else if (!showCleaned) t
+        else cleanOcrText(t).ifBlank { "(Nothing useful after cleanup)" }
     }
 
     Scaffold(
@@ -107,7 +116,7 @@ private fun OcrScreen() {
             verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
             Text(
-                "Pick an image. We run OCR and dump the result below.",
+                "Pick a screenshot. We OCR it and (optionally) clean the junk UI text.",
                 style = MaterialTheme.typography.bodyMedium
             )
 
@@ -122,6 +131,17 @@ private fun OcrScreen() {
                 }
             }
 
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                FilterChip(
+                    selected = showCleaned,
+                    onClick = { showCleaned = !showCleaned },
+                    label = { Text(if (showCleaned) "Cleaned" else "Raw") }
+                )
+            }
+
             if (errorText != null) {
                 Text(
                     text = errorText!!,
@@ -134,12 +154,75 @@ private fun OcrScreen() {
                 Column(Modifier.padding(12.dp)) {
                     Text("Result", style = MaterialTheme.typography.titleMedium)
                     Spacer(Modifier.height(8.dp))
-                    Text(
-                        text = if (resultText.isBlank()) "(empty)" else resultText,
-                        style = MaterialTheme.typography.bodySmall
-                    )
+                    Text(displayText, style = MaterialTheme.typography.bodySmall)
                 }
             }
         }
     }
+}
+
+/**
+ * Simple, brutal OCR cleanup tuned for chat/screenshot OCR:
+ * - drops keyboard rows
+ * - drops obvious UI chrome (Active Now, Message, language)
+ * - drops lone digits (often keyboard index labels)
+ * - removes repeated short garbage lines
+ */
+private fun cleanOcrText(input: String): String {
+    val lines = input
+        .replace("\r\n", "\n")
+        .split('\n')
+        .map { it.trim() }
+        .filter { it.isNotBlank() }
+
+    val blacklistExact = setOf(
+        "active now",
+        "message",
+        "english (us)",
+        "search",
+        "home",
+        "back"
+    )
+
+    // Keyboard-ish lines: lots of single letters separated by spaces, e.g. "Q W E R T Y"
+    fun isKeyboardRow(s: String): Boolean {
+        val noDots = s.replace(".", "")
+        val tokens = noDots.split(Regex("\\s+")).filter { it.isNotBlank() }
+        if (tokens.size < 6) return false
+        val singleLetter = tokens.count { it.length == 1 && it[0].isLetter() }
+        return singleLetter >= 6
+    }
+
+    // Lone digits are often keyboard row labels in OCR output from screenshots
+    fun isLoneDigitLine(s: String): Boolean = s.length <= 2 && s.all { it.isDigit() }
+
+    // Time lines like "12:38 AM" / "2:18" etc.
+    val timeRegex = Regex("""^\d{1,2}:\d{2}\s?(AM|PM)?$""", RegexOption.IGNORE_CASE)
+
+    // Remove super-short noise lines that are just symbols
+    fun isSymbolNoise(s: String): Boolean =
+        s.length <= 2 && s.any { !it.isLetterOrDigit() } && s.all { !it.isLetterOrDigit() || it == '+' }
+
+    val cleaned = mutableListOf<String>()
+    for (raw in lines) {
+        val s = raw.trim()
+        val lower = s.lowercase(Locale.US)
+
+        if (blacklistExact.contains(lower)) continue
+        if (isKeyboardRow(s)) continue
+        if (isLoneDigitLine(s)) continue
+        if (timeRegex.matches(s)) continue
+        if (isSymbolNoise(s)) continue
+
+        // Drop lines that are basically “divider” OCR like "||" etc.
+        if (lower == "||" || lower == "|" || lower == "ll") continue
+
+        cleaned += s
+    }
+
+    // Collapse multiple blank-ish / repeated garbage
+    return cleaned
+        .joinToString("\n")
+        .replace(Regex("\n{3,}"), "\n\n")
+        .trim()
 }
