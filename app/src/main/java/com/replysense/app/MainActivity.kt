@@ -20,10 +20,10 @@ import com.google.mlkit.vision.common.InputImage
 import com.google.mlkit.vision.text.TextRecognition
 import com.google.mlkit.vision.text.latin.TextRecognizerOptions
 import com.replysense.app.ui.CropperDialog
+import com.replysense.app.util.OcrLayoutCluster
 import com.replysense.app.util.OcrPostProcess
 
 class MainActivity : ComponentActivity() {
-
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContent { ReplySenseApp() }
@@ -35,12 +35,10 @@ class MainActivity : ComponentActivity() {
 private fun ReplySenseApp() {
     val ctx = LocalContext.current
 
-    var pickedUri by remember { mutableStateOf<Uri?>(null) }
     var pickedBitmap by remember { mutableStateOf<Bitmap?>(null) }
     var showCrop by remember { mutableStateOf(false) }
 
     var rawText by remember { mutableStateOf("") }
-
     var messages by remember { mutableStateOf<List<OcrPostProcess.Msg>>(emptyList()) }
     var selectedMsgId by remember { mutableStateOf<Int?>(null) }
 
@@ -53,12 +51,19 @@ private fun ReplySenseApp() {
 
     val pickImageLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.GetContent()
-    ) { uri ->
+    ) { uri: Uri? ->
         if (uri != null) {
-            pickedUri = uri
             pickedBitmap = loadBitmapFromUri(ctx, uri)
             showCrop = pickedBitmap != null
         }
+    }
+
+    fun rebuildDebug() {
+        transcript = messages.joinToString("\n") { m ->
+            val who = if (m.dir == OcrPostProcess.Dir.THEM) "THEM" else "ME"
+            "$who: ${m.text}"
+        }
+        json = messagesToJson(messages)
     }
 
     fun runOcr(bitmap: Bitmap) {
@@ -68,17 +73,27 @@ private fun ReplySenseApp() {
         recognizer.process(image)
             .addOnSuccessListener { result ->
                 rawText = result.text ?: ""
-                val processed = OcrPostProcess.processThreadAware(
-                    input = rawText,
-                    clean = true,
-                    mergeLines = true,
-                    threadOnly = true
+
+                // ✅ NEW: bubble-aware splitter
+                val extracted = OcrLayoutCluster.extractMessages(
+                    result = result,
+                    imageWidthPx = bitmap.width,
+                    imageHeightPx = bitmap.height
                 )
-                messages = processed.messages
+
+                messages = if (extracted.isNotEmpty()) extracted else {
+                    // Fallback to old pipeline if clustering returns nothing
+                    OcrPostProcess.processThreadAware(
+                        input = rawText,
+                        clean = true,
+                        mergeLines = true,
+                        threadOnly = true
+                    ).messages
+                }
+
                 selectedMsgId = messages.firstOrNull()?.id
-                transcript = processed.transcript
-                json = processed.json
-                generatedReply = "" // clear
+                generatedReply = ""
+                rebuildDebug()
             }
             .addOnFailureListener { e ->
                 rawText = "OCR error: ${e.message ?: e.javaClass.simpleName}"
@@ -115,13 +130,14 @@ private fun ReplySenseApp() {
                     actions = {
                         AssistChip(
                             onClick = {
-                                replyTarget = if (replyTarget == ReplyTarget.LAST_INCOMING)
-                                    ReplyTarget.SELECTED else ReplyTarget.LAST_INCOMING
+                                replyTarget =
+                                    if (replyTarget == ReplyTarget.LAST_INCOMING) ReplyTarget.SELECTED
+                                    else ReplyTarget.LAST_INCOMING
                             },
                             label = {
                                 Text(
-                                    if (replyTarget == ReplyTarget.LAST_INCOMING)
-                                        "Reply: Last THEM" else "Reply: Selected"
+                                    if (replyTarget == ReplyTarget.LAST_INCOMING) "Reply: Last THEM"
+                                    else "Reply: Selected"
                                 )
                             }
                         )
@@ -137,24 +153,16 @@ private fun ReplySenseApp() {
                     .verticalScroll(rememberScrollState())
             ) {
                 Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                    Button(onClick = { pickImageLauncher.launch("image/*") }) {
-                        Text("Pick image")
-                    }
+                    Button(onClick = { pickImageLauncher.launch("image/*") }) { Text("Pick image") }
                     Button(
-                        onClick = {
-                            val bm = pickedBitmap
-                            if (bm != null) runOcr(bm)
-                        },
+                        onClick = { pickedBitmap?.let { runOcr(it) } },
                         enabled = pickedBitmap != null
                     ) { Text("Run OCR") }
                 }
 
                 Spacer(Modifier.height(12.dp))
 
-                ToneRow(
-                    tone = tone,
-                    onTone = { tone = it },
-                )
+                ToneRow(tone = tone, onTone = { tone = it })
 
                 Spacer(Modifier.height(16.dp))
 
@@ -172,6 +180,7 @@ private fun ReplySenseApp() {
                                 onSelect = { selectedMsgId = m.id },
                                 onToggleDir = {
                                     messages = OcrPostProcess.toggleDir(messages, m.id)
+                                    rebuildDebug()
                                 }
                             )
                         }
@@ -223,7 +232,6 @@ private fun ReplySenseApp() {
         }
     }
 
-    // Crop overlay
     if (showCrop && pickedBitmap != null) {
         CropperDialog(
             title = "Crop to chat area",
@@ -232,7 +240,6 @@ private fun ReplySenseApp() {
             onConfirm = { cropped ->
                 pickedBitmap = cropped
                 showCrop = false
-                // optional auto-run OCR after crop:
                 runOcr(cropped)
             }
         )
@@ -240,26 +247,11 @@ private fun ReplySenseApp() {
 }
 
 @Composable
-private fun ToneRow(
-    tone: Tone,
-    onTone: (Tone) -> Unit
-) {
+private fun ToneRow(tone: Tone, onTone: (Tone) -> Unit) {
     Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-        FilterChip(
-            selected = tone == Tone.CHILL,
-            onClick = { onTone(Tone.CHILL) },
-            label = { Text("Chill") }
-        )
-        FilterChip(
-            selected = tone == Tone.FLIRTY,
-            onClick = { onTone(Tone.FLIRTY) },
-            label = { Text("Flirty") }
-        )
-        FilterChip(
-            selected = tone == Tone.FIRM,
-            onClick = { onTone(Tone.FIRM) },
-            label = { Text("Firm") }
-        )
+        FilterChip(selected = tone == Tone.CHILL, onClick = { onTone(Tone.CHILL) }, label = { Text("Chill") })
+        FilterChip(selected = tone == Tone.FLIRTY, onClick = { onTone(Tone.FLIRTY) }, label = { Text("Flirty") })
+        FilterChip(selected = tone == Tone.FIRM, onClick = { onTone(Tone.FIRM) }, label = { Text("Firm") })
     }
 }
 
@@ -281,15 +273,10 @@ private fun MessageCard(
                     onClick = onToggleDir,
                     label = { Text(if (msg.dir == OcrPostProcess.Dir.THEM) "THEM" else "ME") }
                 )
-                if (selected) {
-                    AssistChip(onClick = {}, label = { Text("Selected") })
-                }
+                if (selected) AssistChip(onClick = {}, label = { Text("Selected") })
             }
             Spacer(Modifier.height(8.dp))
-            Text(
-                text = msg.text,
-                fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal
-            )
+            Text(text = msg.text, fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal)
         }
     }
 }
@@ -297,38 +284,18 @@ private fun MessageCard(
 private enum class ReplyTarget { LAST_INCOMING, SELECTED }
 private enum class Tone { CHILL, FLIRTY, FIRM }
 
-/**
- * Simple local reply engine (zero network).
- * This keeps your baseline clean and predictable.
- */
 private object LocalReplyEngine {
     fun generate(input: String, tone: Tone): String {
         val s = input.trim()
-
-        // Super tiny heuristics: if question -> answer style, else acknowledgement style.
         val isQuestion = s.contains('?') || s.lowercase().startsWith("wyd") || s.lowercase().startsWith("wya")
-
         return when (tone) {
-            Tone.CHILL -> {
-                if (isQuestion) "Lowkey yeah — what’s the move?"
-                else "Bet 😌 what were you thinking?"
-            }
-            Tone.FLIRTY -> {
-                if (isQuestion) "Maybe 😏 convince me."
-                else "Okayyy 👀 you trying to tempt me or what?"
-            }
-            Tone.FIRM -> {
-                if (isQuestion) "What exactly are you asking me to do?"
-                else "Say it straight — what do you want?"
-            }
+            Tone.CHILL -> if (isQuestion) "Lowkey yeah — what’s the move?" else "Bet 😌 what were you thinking?"
+            Tone.FLIRTY -> if (isQuestion) "Maybe 😏 convince me." else "Okayyy 👀 you trying to tempt me or what?"
+            Tone.FIRM -> if (isQuestion) "What exactly are you asking me to do?" else "Say it straight — what do you want?"
         }
     }
 }
 
-/**
- * Minimal URI→Bitmap loader.
- * Uses platform decoder for simplicity (good enough for baseline).
- */
 private fun loadBitmapFromUri(ctx: android.content.Context, uri: Uri): Bitmap? {
     return try {
         val resolver = ctx.contentResolver
@@ -338,4 +305,12 @@ private fun loadBitmapFromUri(ctx: android.content.Context, uri: Uri): Bitmap? {
     } catch (_: Throwable) {
         null
     }
+}
+
+private fun messagesToJson(msgs: List<OcrPostProcess.Msg>): String {
+    fun esc(s: String) = s.replace("\\", "\\\\").replace("\"", "\\\"").replace("\n", "\\n")
+    val items = msgs.joinToString(",") { m ->
+        """{"id":${m.id},"dir":"${m.dir.name}","text":"${esc(m.text)}"}"""
+    }
+    return "[$items]"
 }
