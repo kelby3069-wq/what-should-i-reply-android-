@@ -14,5 +14,5 @@ dependencyResolutionManagement {
     }
 }
 
-rootProject.name = "what-should-i-reply-android"
+rootProject.name = "DeadlockOCRBaseline"
 include(":app")
