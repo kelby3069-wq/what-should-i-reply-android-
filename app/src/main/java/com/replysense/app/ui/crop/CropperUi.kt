@@ -4,11 +4,11 @@ import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.spring
 import androidx.compose.foundation.Canvas
-import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material3.*
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Surface
+import androidx.compose.material3.Text
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -16,27 +16,27 @@ import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.geometry.Size
-import androidx.compose.ui.graphics.*
+import androidx.compose.ui.graphics.BlendMode
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.CompositingStrategy
+import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.unit.dp
-import kotlin.math.max
-import kotlin.math.min
 
 /**
  * Visual-only crop overlay:
  * - Dims outside crop rect
- * - Border + corner handles
- * - Draggable crop rect (move only)
+ * - Border + grid + corner handles
+ * - Drag to move crop rect (no resize yet)
  *
- * NOTE: This does NOT change your underlying crop logic yet.
- * Wire it to your existing crop rect state by passing rect in/out.
+ * rect is normalized [0..1] in both axes.
  */
 @Composable
 fun PremiumCropOverlay(
     modifier: Modifier = Modifier,
-    // Rect is normalized to [0..1] in both axes (relative to image bounds)
     rect: Rect,
     onRectChange: (Rect) -> Unit,
     showGrid: Boolean = true
@@ -51,9 +51,12 @@ fun PremiumCropOverlay(
     )
 
     Box(modifier = modifier.fillMaxSize()) {
+
         Canvas(
             modifier = Modifier
                 .fillMaxSize()
+                // ✅ Required so BlendMode.Clear actually punches a hole (works across devices)
+                .graphicsLayer { compositingStrategy = CompositingStrategy.Offscreen }
                 .pointerInput(Unit) {
                     detectDragGestures(
                         onDragStart = {
@@ -65,7 +68,6 @@ fun PremiumCropOverlay(
                         onDrag = { change, dragAmount ->
                             change.consume()
 
-                            // Move-only drag in normalized space
                             val w = size.width
                             val h = size.height
                             if (w <= 0f || h <= 0f) return@detectDragGestures
@@ -73,25 +75,21 @@ fun PremiumCropOverlay(
                             val dx = dragAmount.x / w
                             val dy = dragAmount.y / h
 
-                            val newLeft = rect.left + dx
-                            val newTop = rect.top + dy
-                            val newRight = rect.right + dx
-                            val newBottom = rect.bottom + dy
-
-                            // Clamp to [0..1]
                             val width = rect.width
                             val height = rect.height
 
-                            val clampedLeft = newLeft.coerceIn(0f, 1f - width)
-                            val clampedTop = newTop.coerceIn(0f, 1f - height)
-                            val clampedRect = Rect(
-                                left = clampedLeft,
-                                top = clampedTop,
-                                right = clampedLeft + width,
-                                bottom = clampedTop + height
-                            )
+                            // Proposed new rect
+                            val newLeft = (rect.left + dx).coerceIn(0f, 1f - width)
+                            val newTop = (rect.top + dy).coerceIn(0f, 1f - height)
 
-                            onRectChange(clampedRect)
+                            onRectChange(
+                                Rect(
+                                    left = newLeft,
+                                    top = newTop,
+                                    right = newLeft + width,
+                                    bottom = newTop + height
+                                )
+                            )
                         }
                     )
                 }
@@ -107,8 +105,9 @@ fun PremiumCropOverlay(
             )
 
             // Dim outside crop
-            val dim = Color.Black.copy(alpha = 0.55f)
-            drawRect(dim)
+            drawRect(Color.Black.copy(alpha = 0.55f))
+
+            // Clear inside crop
             drawRect(
                 color = Color.Transparent,
                 topLeft = Offset(crop.left, crop.top),
@@ -133,14 +132,12 @@ fun PremiumCropOverlay(
                 val thirdH = crop.height / 3f
 
                 for (i in 1..2) {
-                    // vertical
                     drawLine(
                         color = gridColor,
                         start = Offset(crop.left + thirdW * i, crop.top),
                         end = Offset(crop.left + thirdW * i, crop.bottom),
                         strokeWidth = 2f
                     )
-                    // horizontal
                     drawLine(
                         color = gridColor,
                         start = Offset(crop.left, crop.top + thirdH * i),
@@ -156,7 +153,6 @@ fun PremiumCropOverlay(
             val handleColor = Color.White.copy(alpha = 0.95f)
 
             fun corner(x: Float, y: Float, dx: Float, dy: Float) {
-                // L shape
                 drawLine(handleColor, Offset(x, y), Offset(x + dx * handleSize, y), handleStroke)
                 drawLine(handleColor, Offset(x, y), Offset(x, y + dy * handleSize), handleStroke)
             }
@@ -167,41 +163,21 @@ fun PremiumCropOverlay(
             corner(crop.right, crop.bottom, -1f, -1f)
         }
 
-        // Bottom controls (visual)
-        Row(
+        // Optional small hint chip (subtle premium)
+        Surface(
             modifier = Modifier
-                .align(Alignment.BottomCenter)
-                .fillMaxWidth()
-                .padding(horizontal = 16.dp, vertical = 18.dp),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically
+                .align(Alignment.TopCenter)
+                .padding(top = 14.dp),
+            color = MaterialTheme.colorScheme.surface.copy(alpha = 0.78f),
+            contentColor = MaterialTheme.colorScheme.onSurface,
+            shape = MaterialTheme.shapes.large,
+            tonalElevation = 2.dp
         ) {
-            Surface(
-                color = MaterialTheme.colorScheme.surface.copy(alpha = 0.80f),
-                contentColor = MaterialTheme.colorScheme.onSurface,
-                shape = RoundedCornerShape(16.dp),
-                tonalElevation = 4.dp
-            ) {
-                Row(
-                    modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Text("Cancel", style = MaterialTheme.typography.labelLarge)
-                    Spacer(Modifier.width(16.dp))
-                    Text("Reset", style = MaterialTheme.typography.labelLarge)
-                }
-            }
-
-            Surface(
-                color = MaterialTheme.colorScheme.primary.copy(alpha = 0.92f),
-                contentColor = MaterialTheme.colorScheme.onPrimary,
-                shape = RoundedCornerShape(16.dp),
-                tonalElevation = 6.dp
-            ) {
-                Box(Modifier.padding(horizontal = 18.dp, vertical = 12.dp)) {
-                    Text("Done", style = MaterialTheme.typography.labelLarge)
-                }
-            }
+            Text(
+                text = "Drag to move",
+                modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+                style = MaterialTheme.typography.labelMedium
+            )
         }
     }
 }
