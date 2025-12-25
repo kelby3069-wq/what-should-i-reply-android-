@@ -1,183 +1,331 @@
 package com.replysense.app.ui.crop
 
-import androidx.compose.animation.core.Spring
-import androidx.compose.animation.core.animateFloatAsState
-import androidx.compose.animation.core.spring
+import android.graphics.Bitmap
 import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.gestures.detectDragGestures
-import androidx.compose.foundation.layout.*
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Surface
-import androidx.compose.material3.Text
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.*
-import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Rect
-import androidx.compose.ui.geometry.Size
-import androidx.compose.ui.graphics.BlendMode
-import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.CompositingStrategy
+import androidx.compose.ui.graphics.*
 import androidx.compose.ui.graphics.drawscope.Stroke
-import androidx.compose.ui.graphics.graphicsLayer
-import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.graphics.drawscope.clipRect
 import androidx.compose.ui.input.pointer.pointerInput
-import androidx.compose.ui.platform.LocalHapticFeedback
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.dp
+import kotlin.math.abs
+import kotlin.math.max
+import kotlin.math.min
 
 /**
- * Visual-only crop overlay:
- * - Dims outside crop rect
- * - Border + grid + corner handles
- * - Drag to move crop rect (no resize yet)
+ * Premium crop overlay that draws on TOP of the actual bitmap (so you never see the app UI in the crop box).
  *
- * rect is normalized [0..1] in both axes.
+ * - The image is rendered with Compose Image(bitmap.asImageBitmap()).
+ * - The crop rect is maintained in normalized [0..1] coords relative to the displayed image bounds.
+ * - You can drag inside to move, drag corners to resize.
+ * - Dims outside area, crisp border, corner handles, rule-of-thirds grid.
  */
 @Composable
-fun PremiumCropOverlay(
-    modifier: Modifier = Modifier,
-    rect: Rect,
-    onRectChange: (Rect) -> Unit,
-    showGrid: Boolean = true
+fun CropperUi(
+    bitmap: Bitmap,
+    requestCropKey: Int,
+    onCropped: (Bitmap) -> Unit,
 ) {
-    val haptics = LocalHapticFeedback.current
-    var isDragging by remember { mutableStateOf(false) }
+    val imageBitmap = remember(bitmap) { bitmap.asImageBitmap() }
 
-    val borderAlpha by animateFloatAsState(
-        targetValue = if (isDragging) 1f else 0.85f,
-        animationSpec = spring(stiffness = Spring.StiffnessMediumLow),
-        label = "borderAlpha"
-    )
+    // Normalized crop rect (relative to displayed image area)
+    var crop by remember {
+        mutableStateOf(NormRect(left = 0.12f, top = 0.12f, right = 0.88f, bottom = 0.88f))
+    }
 
-    Box(modifier = modifier.fillMaxSize()) {
+    // When requestCropKey increments, generate output bitmap
+    LaunchedEffect(requestCropKey) {
+        if (requestCropKey == 0) return@LaunchedEffect
+        val out = cropBitmapFromNormalized(bitmap, crop)
+        onCropped(out)
+    }
 
-        Canvas(
-            modifier = Modifier
-                .fillMaxSize()
-                // ✅ Required so BlendMode.Clear actually punches a hole (works across devices)
-                .graphicsLayer { compositingStrategy = CompositingStrategy.Offscreen }
-                .pointerInput(Unit) {
-                    detectDragGestures(
-                        onDragStart = {
-                            isDragging = true
-                            haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                        },
-                        onDragEnd = { isDragging = false },
-                        onDragCancel = { isDragging = false },
-                        onDrag = { change, dragAmount ->
-                            change.consume()
+    Box(modifier = Modifier.fillMaxSize()) {
+        // Draw the bitmap itself (this is the fix for "crop box shows app UI")
+        Image(
+            bitmap = imageBitmap,
+            contentDescription = null,
+            modifier = Modifier.fillMaxSize(),
+            contentScale = ContentScale.Fit
+        )
 
-                            val w = size.width
-                            val h = size.height
-                            if (w <= 0f || h <= 0f) return@detectDragGestures
+        // Overlay + gestures
+        CropOverlay(
+            bitmap = bitmap,
+            crop = crop,
+            onCropChange = { crop = it }
+        )
+    }
+}
 
-                            val dx = dragAmount.x / w
-                            val dy = dragAmount.y / h
+@Composable
+private fun CropOverlay(
+    bitmap: Bitmap,
+    crop: NormRect,
+    onCropChange: (NormRect) -> Unit
+) {
+    val density = LocalDensity.current
 
-                            val width = rect.width
-                            val height = rect.height
+    // Handle sizing
+    val handleRadiusPx = with(density) { 10.dp.toPx() }
+    val borderPx = with(density) { 2.dp.toPx() }
+    val gridPx = with(density) { 1.dp.toPx() }
 
-                            // Proposed new rect
-                            val newLeft = (rect.left + dx).coerceIn(0f, 1f - width)
-                            val newTop = (rect.top + dy).coerceIn(0f, 1f - height)
+    var activeDrag by remember { mutableStateOf(DragMode.None) }
 
-                            onRectChange(
-                                Rect(
-                                    left = newLeft,
-                                    top = newTop,
-                                    right = newLeft + width,
-                                    bottom = newTop + height
-                                )
-                            )
+    Canvas(
+        modifier = Modifier
+            .fillMaxSize()
+            .pointerInput(Unit) {
+                detectDragGestures(
+                    onDragStart = { pos ->
+                        // Determine displayed image rect for hit-testing
+                        val imgRect = fittedImageRect(
+                            containerW = size.width,
+                            containerH = size.height,
+                            imageW = bitmap.width.toFloat(),
+                            imageH = bitmap.height.toFloat()
+                        )
+
+                        val cropRectPx = crop.toPxRect(imgRect)
+                        val corners = cropRectPx.corners()
+
+                        activeDrag = when {
+                            pos.distTo(corners.tl) <= handleRadiusPx * 1.8f -> DragMode.ResizeTL
+                            pos.distTo(corners.tr) <= handleRadiusPx * 1.8f -> DragMode.ResizeTR
+                            pos.distTo(corners.br) <= handleRadiusPx * 1.8f -> DragMode.ResizeBR
+                            pos.distTo(corners.bl) <= handleRadiusPx * 1.8f -> DragMode.ResizeBL
+                            cropRectPx.contains(pos) -> DragMode.Move
+                            else -> DragMode.None
                         }
-                    )
-                }
-        ) {
-            val w = size.width
-            val h = size.height
+                    },
+                    onDragEnd = { activeDrag = DragMode.None },
+                    onDragCancel = { activeDrag = DragMode.None },
+                    onDrag = { change, dragAmount ->
+                        change.consume()
 
-            val crop = Rect(
-                left = rect.left * w,
-                top = rect.top * h,
-                right = rect.right * w,
-                bottom = rect.bottom * h
+                        val imgRect = fittedImageRect(
+                            containerW = size.width,
+                            containerH = size.height,
+                            imageW = bitmap.width.toFloat(),
+                            imageH = bitmap.height.toFloat()
+                        )
+                        val minSize = 0.10f // 10% min width/height in normalized space
+                        val dxN = dragAmount.x / imgRect.width
+                        val dyN = dragAmount.y / imgRect.height
+
+                        var n = crop
+
+                        when (activeDrag) {
+                            DragMode.Move -> {
+                                n = n.offset(dxN, dyN)
+                            }
+                            DragMode.ResizeTL -> {
+                                n = n.copy(left = n.left + dxN, top = n.top + dyN)
+                            }
+                            DragMode.ResizeTR -> {
+                                n = n.copy(right = n.right + dxN, top = n.top + dyN)
+                            }
+                            DragMode.ResizeBR -> {
+                                n = n.copy(right = n.right + dxN, bottom = n.bottom + dyN)
+                            }
+                            DragMode.ResizeBL -> {
+                                n = n.copy(left = n.left + dxN, bottom = n.bottom + dyN)
+                            }
+                            DragMode.None -> Unit
+                        }
+
+                        n = n
+                            .normalized()
+                            .clamp01()
+                            .enforceMinSize(minSize)
+
+                        onCropChange(n)
+                    }
+                )
+            }
+    ) {
+        val imgRect = fittedImageRect(
+            containerW = size.width,
+            containerH = size.height,
+            imageW = bitmap.width.toFloat(),
+            imageH = bitmap.height.toFloat()
+        )
+
+        // Dim outside image bounds slightly (premium look)
+        drawRect(Color.Black.copy(alpha = 0.35f))
+
+        // Dim outside crop area (but only inside the image bounds)
+        val cropRect = crop.toPxRect(imgRect)
+
+        // Clip to image, then draw dim outside crop
+        clipRect(imgRect.left, imgRect.top, imgRect.right, imgRect.bottom) {
+            // Outside crop dim
+            drawRect(
+                color = Color.Black.copy(alpha = 0.50f),
+                topLeft = Offset(imgRect.left, imgRect.top),
+                size = imgRect.size
             )
-
-            // Dim outside crop
-            drawRect(Color.Black.copy(alpha = 0.55f))
-
-            // Clear inside crop
+            // Clear inside crop by drawing with BlendMode.Clear
             drawRect(
                 color = Color.Transparent,
-                topLeft = Offset(crop.left, crop.top),
-                size = Size(crop.width, crop.height),
+                topLeft = Offset(cropRect.left, cropRect.top),
+                size = cropRect.size,
                 blendMode = BlendMode.Clear
             )
-
-            // Border
-            val borderColor = Color.White.copy(alpha = borderAlpha)
-            drawRoundRect(
-                color = borderColor,
-                topLeft = Offset(crop.left, crop.top),
-                size = Size(crop.width, crop.height),
-                cornerRadius = CornerRadius(18f, 18f),
-                style = Stroke(width = 3f)
-            )
-
-            // Grid
-            if (showGrid) {
-                val gridColor = Color.White.copy(alpha = 0.22f)
-                val thirdW = crop.width / 3f
-                val thirdH = crop.height / 3f
-
-                for (i in 1..2) {
-                    drawLine(
-                        color = gridColor,
-                        start = Offset(crop.left + thirdW * i, crop.top),
-                        end = Offset(crop.left + thirdW * i, crop.bottom),
-                        strokeWidth = 2f
-                    )
-                    drawLine(
-                        color = gridColor,
-                        start = Offset(crop.left, crop.top + thirdH * i),
-                        end = Offset(crop.right, crop.top + thirdH * i),
-                        strokeWidth = 2f
-                    )
-                }
-            }
-
-            // Corner handles (visual)
-            val handleSize = 22f
-            val handleStroke = 6f
-            val handleColor = Color.White.copy(alpha = 0.95f)
-
-            fun corner(x: Float, y: Float, dx: Float, dy: Float) {
-                drawLine(handleColor, Offset(x, y), Offset(x + dx * handleSize, y), handleStroke)
-                drawLine(handleColor, Offset(x, y), Offset(x, y + dy * handleSize), handleStroke)
-            }
-
-            corner(crop.left, crop.top, +1f, +1f)
-            corner(crop.right, crop.top, -1f, +1f)
-            corner(crop.left, crop.bottom, +1f, -1f)
-            corner(crop.right, crop.bottom, -1f, -1f)
         }
 
-        // Optional small hint chip (subtle premium)
-        Surface(
-            modifier = Modifier
-                .align(Alignment.TopCenter)
-                .padding(top = 14.dp),
-            color = MaterialTheme.colorScheme.surface.copy(alpha = 0.78f),
-            contentColor = MaterialTheme.colorScheme.onSurface,
-            shape = MaterialTheme.shapes.large,
-            tonalElevation = 2.dp
-        ) {
-            Text(
-                text = "Drag to move",
-                modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
-                style = MaterialTheme.typography.labelMedium
-            )
-        }
+        // Border
+        drawRect(
+            color = Color.White.copy(alpha = 0.92f),
+            topLeft = Offset(cropRect.left, cropRect.top),
+            size = cropRect.size,
+            style = Stroke(width = borderPx)
+        )
+
+        // Rule-of-thirds grid
+        val gridColor = Color.White.copy(alpha = 0.28f)
+        val thirdW = cropRect.width / 3f
+        val thirdH = cropRect.height / 3f
+
+        // vertical
+        drawLine(gridColor, Offset(cropRect.left + thirdW, cropRect.top), Offset(cropRect.left + thirdW, cropRect.bottom), strokeWidth = gridPx)
+        drawLine(gridColor, Offset(cropRect.left + 2f * thirdW, cropRect.top), Offset(cropRect.left + 2f * thirdW, cropRect.bottom), strokeWidth = gridPx)
+        // horizontal
+        drawLine(gridColor, Offset(cropRect.left, cropRect.top + thirdH), Offset(cropRect.right, cropRect.top + thirdH), strokeWidth = gridPx)
+        drawLine(gridColor, Offset(cropRect.left, cropRect.top + 2f * thirdH), Offset(cropRect.right, cropRect.top + 2f * thirdH), strokeWidth = gridPx)
+
+        // Corner handles (white ring + inner fill for "iOS/IG" feel)
+        val corners = cropRect.corners()
+        drawHandle(corners.tl, handleRadiusPx)
+        drawHandle(corners.tr, handleRadiusPx)
+        drawHandle(corners.br, handleRadiusPx)
+        drawHandle(corners.bl, handleRadiusPx)
     }
+}
+
+private fun androidx.compose.ui.graphics.drawscope.DrawScope.drawHandle(center: Offset, r: Float) {
+    drawCircle(color = Color.White.copy(alpha = 0.95f), radius = r, center = center)
+    drawCircle(color = Color.Black.copy(alpha = 0.55f), radius = r * 0.62f, center = center)
+}
+
+/** Compute the rect where the image is actually drawn when using ContentScale.Fit. */
+private fun fittedImageRect(
+    containerW: Float,
+    containerH: Float,
+    imageW: Float,
+    imageH: Float
+): Rect {
+    val containerAR = containerW / containerH
+    val imageAR = imageW / imageH
+
+    return if (imageAR > containerAR) {
+        // Image constrained by width
+        val drawW = containerW
+        val drawH = drawW / imageAR
+        val top = (containerH - drawH) / 2f
+        Rect(0f, top, drawW, top + drawH)
+    } else {
+        // Image constrained by height
+        val drawH = containerH
+        val drawW = drawH * imageAR
+        val left = (containerW - drawW) / 2f
+        Rect(left, 0f, left + drawW, drawH)
+    }
+}
+
+private data class NormRect(val left: Float, val top: Float, val right: Float, val bottom: Float) {
+    fun normalized(): NormRect {
+        val l = min(left, right)
+        val r = max(left, right)
+        val t = min(top, bottom)
+        val b = max(top, bottom)
+        return NormRect(l, t, r, b)
+    }
+
+    fun clamp01(): NormRect = NormRect(
+        left = left.coerceIn(0f, 1f),
+        top = top.coerceIn(0f, 1f),
+        right = right.coerceIn(0f, 1f),
+        bottom = bottom.coerceIn(0f, 1f)
+    )
+
+    fun enforceMinSize(minSize: Float): NormRect {
+        var l = left
+        var r = right
+        var t = top
+        var b = bottom
+
+        if (r - l < minSize) {
+            val mid = (l + r) / 2f
+            l = (mid - minSize / 2f).coerceIn(0f, 1f - minSize)
+            r = l + minSize
+        }
+        if (b - t < minSize) {
+            val mid = (t + b) / 2f
+            t = (mid - minSize / 2f).coerceIn(0f, 1f - minSize)
+            b = t + minSize
+        }
+        return NormRect(l, t, r, b).clamp01()
+    }
+
+    fun offset(dx: Float, dy: Float): NormRect {
+        val w = right - left
+        val h = bottom - top
+        var l = (left + dx)
+        var t = (top + dy)
+        l = l.coerceIn(0f, 1f - w)
+        t = t.coerceIn(0f, 1f - h)
+        return NormRect(l, t, l + w, t + h)
+    }
+
+    fun toPxRect(imageRect: Rect): Rect {
+        val l = imageRect.left + left * imageRect.width
+        val r = imageRect.left + right * imageRect.width
+        val t = imageRect.top + top * imageRect.height
+        val b = imageRect.top + bottom * imageRect.height
+        return Rect(l, t, r, b)
+    }
+}
+
+private data class CornerPoints(val tl: Offset, val tr: Offset, val br: Offset, val bl: Offset)
+
+private fun Rect.corners(): CornerPoints = CornerPoints(
+    tl = Offset(left, top),
+    tr = Offset(right, top),
+    br = Offset(right, bottom),
+    bl = Offset(left, bottom)
+)
+
+private fun Offset.distTo(o: Offset): Float {
+    val dx = x - o.x
+    val dy = y - o.y
+    return kotlin.math.sqrt(dx * dx + dy * dy)
+}
+
+private fun Rect.contains(p: Offset): Boolean =
+    p.x in left..right && p.y in top..bottom
+
+private enum class DragMode { None, Move, ResizeTL, ResizeTR, ResizeBR, ResizeBL }
+
+/**
+ * Crops the original bitmap using normalized crop rect.
+ * This uses the *original bitmap* coordinate space, not the displayed rect (correct result).
+ */
+private fun cropBitmapFromNormalized(src: Bitmap, crop: NormRect): Bitmap {
+    val n = crop.normalized().clamp01()
+    val x = (n.left * src.width).toInt().coerceIn(0, src.width - 1)
+    val y = (n.top * src.height).toInt().coerceIn(0, src.height - 1)
+    val w = ((n.right - n.left) * src.width).toInt().coerceIn(1, src.width - x)
+    val h = ((n.bottom - n.top) * src.height).toInt().coerceIn(1, src.height - y)
+    return Bitmap.createBitmap(src, x, y, w, h)
 }
