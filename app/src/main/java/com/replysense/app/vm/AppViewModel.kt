@@ -1,81 +1,57 @@
 package com.replysense.app.vm
 
 import androidx.lifecycle.ViewModel
-import androidx.lifecycle.viewModelScope
-import com.replysense.app.model.ConversationTurn
-import com.replysense.app.net.Api
-import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
-import kotlinx.coroutines.launch
+import kotlinx.coroutines.flow.asStateFlow
 
-data class UiState(
-    val inputText: String = "",
-    val vibeOverride: String? = null,          // null = auto vibe
-    val isLoading: Boolean = false,
-    val error: String? = null,
-    val suggestions: List<String> = emptyList(),
-    val conversation: List<ConversationTurn> = emptyList()
-)
-
+/**
+ * ReplySense baseline ViewModel.
+ *
+ * Baseline goal: compile + run OCR (ML Kit) with minimal UI.
+ * No networking, no repository, no DB, no tabs.
+ *
+ * Later we can reintroduce the real model (API requests, history, options, etc.)
+ * once the build is stable.
+ */
 class AppViewModel : ViewModel() {
 
+    data class UiState(
+        val inputText: String = "",
+        val outputText: String = "",
+        val isBusy: Boolean = false,
+        val errorMessage: String? = null
+    )
+
     private val _state = MutableStateFlow(UiState())
-    val state: StateFlow<UiState> = _state
+    val state: StateFlow<UiState> = _state.asStateFlow()
 
-    fun setInputText(value: String) {
-        _state.value = _state.value.copy(inputText = value, error = null)
+    fun setInput(text: String) {
+        _state.value = _state.value.copy(inputText = text, errorMessage = null)
     }
 
-    fun setVibeOverride(vibe: String?) {
-        // null = auto vibe
-        _state.value = _state.value.copy(vibeOverride = vibe, error = null)
+    fun setOutput(text: String) {
+        _state.value = _state.value.copy(outputText = text, errorMessage = null)
     }
 
-    fun addTurn(from: ConversationTurn.From, text: String) {
-        val updated = _state.value.conversation.toMutableList()
-        updated.add(ConversationTurn(from = from, text = text))
-        _state.value = _state.value.copy(conversation = updated)
+    fun clear() {
+        _state.value = UiState()
     }
 
-    fun clearConversation() {
-        _state.value = _state.value.copy(conversation = emptyList(), error = null)
-    }
-
-    fun requestReplies() {
-        val text = _state.value.inputText.trim()
-        if (text.isBlank()) return
-
-        _state.value = _state.value.copy(isLoading = true, error = null, suggestions = emptyList())
-
-        viewModelScope.launch(Dispatchers.IO) {
-            val req = Api.buildReplyRequest(
-                message = text,
-                vibe = _state.value.vibeOverride, // null = auto vibe
-                context = null
-            )
-
-            val resp = runCatching { Api.postReply(req) }.getOrElse {
-                return@launch postError("Network error", it.message)
-            }
-
-            if (resp.error != null) {
-                postError(resp.error ?: "Error", resp.details)
-                return@launch
-            }
-
-            val opts = resp.options.map { it.text }.filter { it.isNotBlank() }
-
-            _state.value = _state.value.copy(
-                isLoading = false,
-                error = null,
-                suggestions = opts.ifEmpty { listOf("No options returned.") }
-            )
+    /**
+     * Placeholder for the future "generate reply" behavior.
+     * Right now it just echoes input to output so UI can wire up without deps.
+     */
+    fun generateReply() {
+        val input = _state.value.inputText.trim()
+        if (input.isEmpty()) {
+            _state.value = _state.value.copy(errorMessage = "Enter text first.")
+            return
         }
-    }
-
-    private fun postError(title: String, details: String?) {
-        val msg = if (details.isNullOrBlank()) title else "$title: $details"
-        _state.value = _state.value.copy(isLoading = false, error = msg, suggestions = emptyList())
+        _state.value = _state.value.copy(
+            isBusy = false,
+            outputText = input,
+            errorMessage = null
+        )
     }
 }
