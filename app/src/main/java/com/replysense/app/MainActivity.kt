@@ -10,6 +10,7 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
@@ -21,8 +22,10 @@ import androidx.compose.ui.unit.dp
 import com.google.mlkit.vision.common.InputImage
 import com.google.mlkit.vision.text.TextRecognition
 import com.google.mlkit.vision.text.latin.TextRecognizerOptions
+import com.replysense.app.net.Api
 import com.replysense.app.ui.CropperDialog
 import com.replysense.app.util.OcrPostProcess
+import com.replysense.app.util.ReplyGenerator
 import kotlin.math.roundToInt
 
 class MainActivity : ComponentActivity() {
@@ -35,13 +38,12 @@ class MainActivity : ComponentActivity() {
 @Composable
 private fun App() {
     MaterialTheme {
-        Surface(Modifier.fillMaxSize()) {
-            OcrScreen()
-        }
+        Surface(Modifier.fillMaxSize()) { OcrScreen() }
     }
 }
 
-private enum class OutputMode { Transcript, Json }
+private enum class OutputMode { Transcript, Json, Messages }
+private enum class Tone { Chill, Flirty, Firm, Savage }
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -61,11 +63,18 @@ private fun OcrScreen() {
     var useMerge by remember { mutableStateOf(true) }
     var useThread by remember { mutableStateOf(true) }
 
-    var outputMode by remember { mutableStateOf(OutputMode.Transcript) }
+    var outputMode by remember { mutableStateOf(OutputMode.Messages) }
 
     // Crop UI state
     var showCropper by remember { mutableStateOf(false) }
     var cropBitmap by remember { mutableStateOf<Bitmap?>(null) }
+
+    // ReplySense upgrades
+    var tone by remember { mutableStateOf(Tone.Chill) }
+    var selectedMsgIndex by remember { mutableStateOf<Int?>(null) }
+    var generatedReply by remember { mutableStateOf("") }
+    var genError by remember { mutableStateOf<String?>(null) }
+    var useAiLater by remember { mutableStateOf(false) } // toggle hook; API currently stubbed
 
     val pickImage = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.GetContent()
@@ -74,16 +83,20 @@ private fun OcrScreen() {
         rawText = ""
         errorText = null
         cropBitmap = null
+        selectedMsgIndex = null
+        generatedReply = ""
+        genError = null
         selectedBitmap = uri?.let { decodeBitmap(context, it) }
-        if (useCrop && selectedBitmap != null) {
-            showCropper = true
-        }
+        if (useCrop && selectedBitmap != null) showCropper = true
     }
 
     fun runOcr(bitmap: Bitmap) {
         isWorking = true
         errorText = null
         rawText = ""
+        selectedMsgIndex = null
+        generatedReply = ""
+        genError = null
 
         val image = InputImage.fromBitmap(bitmap, 0)
         val recognizer = TextRecognition.getClient(TextRecognizerOptions.DEFAULT_OPTIONS)
@@ -103,7 +116,9 @@ private fun OcrScreen() {
         val t = rawText.trim()
         if (t.isEmpty()) return@remember OcrPostProcess.Processed(
             transcript = "",
-            json = "[]"
+            json = "[]",
+            messageCount = 0,
+            messages = emptyList()
         )
         OcrPostProcess.processThreadAware(
             input = t,
@@ -113,11 +128,44 @@ private fun OcrScreen() {
         )
     }
 
-    val displayText = when {
-        errorText != null -> errorText!!
-        rawText.isBlank() -> "(empty)"
-        outputMode == OutputMode.Transcript -> processed.transcript.ifBlank { "(Nothing useful after processing)" }
-        else -> processed.json.ifBlank { "[]" }
+    fun generateReplyForSelected() {
+        genError = null
+        generatedReply = ""
+        val idx = selectedMsgIndex
+        if (idx == null) {
+            genError = "Tap a message first."
+            return
+        }
+        val msg = processed.messages.getOrNull(idx)
+        if (msg == null) {
+            genError = "Selected message not found."
+            return
+        }
+
+        val toneStr = tone.name.lowercase()
+        val contextText = processed.transcript.take(2000)
+
+        if (useAiLater && Api.isEnabled()) {
+            // AI hook (stubbed right now)
+            val prompt = ReplyGenerator.buildPrompt(
+                tone = toneStr,
+                selectedMessage = msg.text,
+                transcriptContext = contextText
+            )
+            val res = Api.sendPrompt(prompt)
+            if (res.isSuccess) {
+                generatedReply = res.getOrNull().orEmpty().trim()
+            } else {
+                genError = res.exceptionOrNull()?.message ?: "AI failed."
+            }
+        } else {
+            // Local baseline generator
+            generatedReply = ReplyGenerator.generate(
+                tone = toneStr,
+                incoming = msg.text,
+                transcriptContext = contextText
+            )
+        }
     }
 
     if (showCropper && selectedBitmap != null) {
@@ -144,34 +192,26 @@ private fun OcrScreen() {
             verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
             Text(
-                "Pick → Crop → OCR → Clean/Merge → Extract thread only.",
+                "Pick → Crop → OCR → Clean/Merge → Thread → tap message → generate reply.",
                 style = MaterialTheme.typography.bodyMedium
             )
 
             Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                Button(onClick = { pickImage.launch("image/*") }, enabled = !isWorking) {
-                    Text("Pick image")
-                }
-
+                Button(onClick = { pickImage.launch("image/*") }, enabled = !isWorking) { Text("Pick image") }
                 Button(
                     onClick = {
                         val bmp = (cropBitmap ?: selectedBitmap)
                         if (bmp != null) runOcr(bmp) else errorText = "Pick an image first."
                     },
                     enabled = !isWorking
-                ) {
-                    Text(if (isWorking) "Working…" else "Run OCR")
-                }
-
+                ) { Text(if (isWorking) "Working…" else "Run OCR") }
                 OutlinedButton(
                     onClick = { if (selectedBitmap != null) showCropper = true },
                     enabled = selectedBitmap != null && !isWorking
-                ) {
-                    Text("Crop")
-                }
+                ) { Text("Crop") }
             }
 
-            // Toggles
+            // OCR pipeline toggles
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
                 FilterChip(selected = useCrop, onClick = { useCrop = !useCrop }, label = { Text("Crop") })
                 FilterChip(selected = useClean, onClick = { useClean = !useClean }, label = { Text("Clean") })
@@ -181,21 +221,112 @@ private fun OcrScreen() {
 
             // Output mode
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
-                AssistChip(
-                    onClick = { outputMode = OutputMode.Transcript },
-                    label = { Text("Transcript") }
-                )
-                AssistChip(
-                    onClick = { outputMode = OutputMode.Json },
-                    label = { Text("JSON") }
-                )
+                AssistChip(onClick = { outputMode = OutputMode.Messages }, label = { Text("Messages") })
+                AssistChip(onClick = { outputMode = OutputMode.Transcript }, label = { Text("Transcript") })
+                AssistChip(onClick = { outputMode = OutputMode.Json }, label = { Text("JSON") })
             }
 
-            OutlinedCard(Modifier.fillMaxWidth()) {
-                Column(Modifier.padding(12.dp)) {
-                    Text("Result", style = MaterialTheme.typography.titleMedium)
-                    Spacer(Modifier.height(8.dp))
-                    Text(displayText, style = MaterialTheme.typography.bodySmall)
+            // Tone + AI hook
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
+                Text("Tone:", style = MaterialTheme.typography.bodyMedium, modifier = Modifier.padding(top = 10.dp))
+                FilterChip(selected = tone == Tone.Chill, onClick = { tone = Tone.Chill }, label = { Text("Chill") })
+                FilterChip(selected = tone == Tone.Flirty, onClick = { tone = Tone.Flirty }, label = { Text("Flirty") })
+                FilterChip(selected = tone == Tone.Firm, onClick = { tone = Tone.Firm }, label = { Text("Firm") })
+                FilterChip(selected = tone == Tone.Savage, onClick = { tone = Tone.Savage }, label = { Text("Savage") })
+            }
+
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
+                FilterChip(
+                    selected = useAiLater,
+                    onClick = { useAiLater = !useAiLater },
+                    label = { Text(if (useAiLater) "AI (hook)" else "Local") }
+                )
+                Button(
+                    onClick = { generateReplyForSelected() },
+                    enabled = processed.messages.isNotEmpty() && !isWorking
+                ) { Text("Generate reply") }
+            }
+
+            if (errorText != null) {
+                Text(errorText!!, color = MaterialTheme.colorScheme.error)
+            }
+
+            when (outputMode) {
+                OutputMode.Messages -> {
+                    OutlinedCard(Modifier.fillMaxWidth()) {
+                        Column(Modifier.padding(12.dp)) {
+                            Text("Messages (tap one)", style = MaterialTheme.typography.titleMedium)
+                            Spacer(Modifier.height(8.dp))
+
+                            if (processed.messages.isEmpty()) {
+                                Text("(No messages detected)", style = MaterialTheme.typography.bodySmall)
+                            } else {
+                                processed.messages.forEachIndexed { i, m ->
+                                    val selected = selectedMsgIndex == i
+                                    val label = buildString {
+                                        if (m.ts != null) append("[${m.ts}] ")
+                                        if (m.speaker != null) append("${m.speaker}: ")
+                                        append(m.text)
+                                    }
+                                    ElevatedCard(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .padding(bottom = 8.dp)
+                                            .clickable {
+                                                selectedMsgIndex = i
+                                                generatedReply = ""
+                                                genError = null
+                                            },
+                                        colors = if (selected)
+                                            CardDefaults.elevatedCardColors(containerColor = MaterialTheme.colorScheme.secondaryContainer)
+                                        else CardDefaults.elevatedCardColors()
+                                    ) {
+                                        Column(Modifier.padding(10.dp)) {
+                                            Text("Message ${i + 1}", style = MaterialTheme.typography.labelMedium)
+                                            Text(label, style = MaterialTheme.typography.bodySmall)
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+
+                OutputMode.Transcript -> {
+                    OutlinedCard(Modifier.fillMaxWidth()) {
+                        Column(Modifier.padding(12.dp)) {
+                            Text("Transcript", style = MaterialTheme.typography.titleMedium)
+                            Spacer(Modifier.height(8.dp))
+                            Text(
+                                processed.transcript.ifBlank { "(empty)" },
+                                style = MaterialTheme.typography.bodySmall
+                            )
+                        }
+                    }
+                }
+
+                OutputMode.Json -> {
+                    OutlinedCard(Modifier.fillMaxWidth()) {
+                        Column(Modifier.padding(12.dp)) {
+                            Text("JSON", style = MaterialTheme.typography.titleMedium)
+                            Spacer(Modifier.height(8.dp))
+                            Text(processed.json.ifBlank { "[]" }, style = MaterialTheme.typography.bodySmall)
+                        }
+                    }
+                }
+            }
+
+            if (genError != null) {
+                Text(genError!!, color = MaterialTheme.colorScheme.error)
+            }
+
+            if (generatedReply.isNotBlank()) {
+                OutlinedCard(Modifier.fillMaxWidth()) {
+                    Column(Modifier.padding(12.dp)) {
+                        Text("Generated reply", style = MaterialTheme.typography.titleMedium)
+                        Spacer(Modifier.height(8.dp))
+                        Text(generatedReply, style = MaterialTheme.typography.bodyMedium)
+                    }
                 }
             }
 
@@ -203,7 +334,7 @@ private fun OcrScreen() {
                 Divider()
                 Text("Debug", style = MaterialTheme.typography.titleSmall)
                 Text(
-                    "Raw: ${rawText.length} chars | Messages: ${processed.messageCount}",
+                    "Raw: ${rawText.length} | Messages: ${processed.messageCount}",
                     style = MaterialTheme.typography.bodySmall
                 )
             }
@@ -223,6 +354,9 @@ private fun decodeBitmap(context: android.content.Context, uri: Uri): Bitmap {
     }
 }
 
+/**
+ * Crop a bitmap using normalized [0..1] rect values.
+ */
 internal fun cropBitmapNormalized(
     src: Bitmap,
     leftN: Float,
