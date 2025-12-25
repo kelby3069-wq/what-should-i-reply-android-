@@ -1,15 +1,9 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
 
-    <!-- Base application theme. -->
     <style name="Theme.ReplySense" parent="Theme.Material3.DayNight.NoActionBar">
-        <!-- Let Compose handle colors; keep XML minimal and safe -->
         <item name="android:statusBarColor">@android:color/transparent</item>
         <item name="android:navigationBarColor">@android:color/transparent</item>
-
-        <!-- Optional: improves contrast for status icons when transparent -->
-        <item name="android:windowLightStatusBar">?attr/isLightTheme</item>
-        <item name="android:windowLightNavigationBar">?attr/isLightTheme</item>
     </style>
 
 </resources>
