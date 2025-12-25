@@ -18,7 +18,9 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.dp
+import com.replysense.app.ui.components.*
 import com.replysense.app.ui.crop.CropScreen
+import com.replysense.app.ui.theme.AppSpacing
 import com.replysense.app.ui.theme.ReplySenseTheme
 
 class MainActivity : ComponentActivity() {
@@ -64,7 +66,7 @@ class MainActivity : ComponentActivity() {
 }
 
 /* ---------------------------
-   App Flow (no nav library)
+   Flow (no nav lib)
    --------------------------- */
 
 private sealed class UiState {
@@ -93,10 +95,7 @@ private fun ReplySenseFlow(
     }
 
     if (error != null) {
-        ErrorDialog(
-            message = error!!,
-            onDismiss = { error = null }
-        )
+        ErrorDialog(message = error!!, onDismiss = { error = null })
     }
 
     when (val s = state) {
@@ -120,11 +119,9 @@ private fun ReplySenseFlow(
             )
         }
 
-        is UiState.Cropped -> CroppedPreviewScreen(
+        is UiState.Cropped -> CroppedSuccessScreen(
             onBack = { state = UiState.Home },
             onContinue = {
-                // ✅ Next step will be: OCR → parse ME/THEM → generate reply
-                // For now: placeholder to prove pipeline is back.
                 error = "Next: OCR + reply generation screen (we wire this after theme)."
             }
         )
@@ -132,78 +129,110 @@ private fun ReplySenseFlow(
 }
 
 /* ---------------------------
-   Screens
+   Screens (premium components)
    --------------------------- */
 
 @Composable
 private fun HomeScreen(onPick: () -> Unit) {
-    Column(
-        modifier = Modifier
-            .fillMaxSize()
-            .padding(20.dp),
-        verticalArrangement = Arrangement.spacedBy(16.dp)
-    ) {
-        Text(
-            text = "ReplySense",
-            style = MaterialTheme.typography.headlineMedium
-        )
+    RSScaffold(title = "ReplySense") { padding ->
+        RSScreen(modifier = Modifier.padding(padding)) {
 
-        Text(
-            text = "Pick a screenshot, crop the chat, then we generate a reply.",
-            style = MaterialTheme.typography.bodyMedium,
-            color = MaterialTheme.colorScheme.onSurfaceVariant
-        )
+            RSSectionHeader(
+                title = "Turn screenshots into replies",
+                subtitle = "Pick a chat screenshot, crop the conversation, then generate a reply."
+            )
 
-        Spacer(Modifier.height(8.dp))
+            RSCard {
+                Text(
+                    "Pipeline",
+                    style = MaterialTheme.typography.titleMedium,
+                    color = MaterialTheme.colorScheme.onSurface
+                )
 
-        Button(
-            onClick = onPick,
-            modifier = Modifier.fillMaxWidth(),
-            contentPadding = PaddingValues(vertical = 14.dp)
-        ) {
-            Text("Pick screenshot")
-        }
+                Column(verticalArrangement = Arrangement.spacedBy(AppSpacing.sm)) {
+                    RSBadge("1) Pick screenshot")
+                    RSBadge("2) Crop chat area")
+                    RSBadge("3) OCR + parse ME/THEM")
+                    RSBadge("4) Generate reply")
+                }
+            }
 
-        OutlinedButton(
-            onClick = {},
-            enabled = false,
-            modifier = Modifier.fillMaxWidth(),
-            contentPadding = PaddingValues(vertical = 14.dp)
-        ) {
-            Text("Theme polish coming next")
+            Column(verticalArrangement = Arrangement.spacedBy(AppSpacing.sm)) {
+                RSPrimaryButton(
+                    text = "Pick screenshot",
+                    onClick = onPick,
+                    modifier = Modifier.fillMaxWidth()
+                )
+                RSSecondaryButton(
+                    text = "How it works",
+                    onClick = { /* optional later */ },
+                    enabled = false,
+                    modifier = Modifier.fillMaxWidth()
+                )
+            }
+
+            Spacer(modifier = Modifier.height(AppSpacing.lg))
+
+            RSCard {
+                Text(
+                    "Design sprint mode",
+                    style = MaterialTheme.typography.titleMedium,
+                    color = MaterialTheme.colorScheme.onSurface
+                )
+                Text(
+                    "We’re polishing visuals first. No new features until this feels App-Store-ready.",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
         }
     }
 }
 
 @Composable
-private fun CroppedPreviewScreen(
+private fun CroppedSuccessScreen(
     onBack: () -> Unit,
     onContinue: () -> Unit
 ) {
-    Column(
-        modifier = Modifier
-            .fillMaxSize()
-            .padding(20.dp),
-        verticalArrangement = Arrangement.spacedBy(14.dp)
-    ) {
-        Text("Cropped", style = MaterialTheme.typography.headlineSmall)
-        Text(
-            "Crop complete. Next step will be OCR → parse → reply.",
-            style = MaterialTheme.typography.bodyMedium,
-            color = MaterialTheme.colorScheme.onSurfaceVariant
-        )
+    RSScaffold(title = "Cropped") { padding ->
+        RSScreen(modifier = Modifier.padding(padding)) {
 
-        Spacer(Modifier.height(8.dp))
+            RSSectionHeader(
+                title = "Crop complete",
+                subtitle = "Next is OCR → parse → reply (we’ll wire it after visuals)."
+            )
 
-        Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-            OutlinedButton(onClick = onBack) { Text("Back") }
-            Button(onClick = onContinue) { Text("Continue") }
+            RSCard {
+                Text(
+                    "Nice.",
+                    style = MaterialTheme.typography.titleLarge,
+                    color = MaterialTheme.colorScheme.onSurface
+                )
+                Text(
+                    "Your crop is ready. This confirms the new crop UI is working and stable.",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+
+            Row(horizontalArrangement = Arrangement.spacedBy(AppSpacing.sm)) {
+                RSSecondaryButton(
+                    text = "Back",
+                    onClick = onBack,
+                    modifier = Modifier.weight(1f)
+                )
+                RSPrimaryButton(
+                    text = "Continue",
+                    onClick = onContinue,
+                    modifier = Modifier.weight(1f)
+                )
+            }
         }
     }
 }
 
 /* ---------------------------
-   Crash UI (keep it)
+   Crash UI (keep it, but premium)
    --------------------------- */
 
 @Composable
@@ -211,40 +240,31 @@ private fun CrashReportScreen(
     crash: String,
     onClear: () -> Unit
 ) {
-    Column(
-        modifier = Modifier
-            .fillMaxSize()
-            .padding(16.dp),
-        verticalArrangement = Arrangement.spacedBy(12.dp)
-    ) {
-        Text("Crash Report", style = MaterialTheme.typography.headlineSmall)
-        Text(
-            "This is why the app instantly closed.",
-            style = MaterialTheme.typography.bodyMedium,
-            color = MaterialTheme.colorScheme.onSurfaceVariant
-        )
+    RSScaffold(title = "Crash Report") { padding ->
+        RSScreen(modifier = Modifier.padding(padding)) {
 
-        ElevatedCard(
-            modifier = Modifier
-                .fillMaxWidth()
-                .weight(1f),
-            colors = CardDefaults.elevatedCardColors(
-                containerColor = MaterialTheme.colorScheme.surface
+            RSSectionHeader(
+                title = "It crashed on launch",
+                subtitle = "Copy the stacktrace and paste it here. We’ll fix the real root cause."
             )
-        ) {
-            Text(
-                text = crash,
-                modifier = Modifier
-                    .fillMaxSize()
-                    .verticalScroll(rememberScrollState())
-                    .padding(12.dp),
-                style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace),
-                color = MaterialTheme.colorScheme.onSurface
-            )
-        }
 
-        Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-            OutlinedButton(onClick = onClear) { Text("Clear & Relaunch") }
+            RSCard(modifier = Modifier.weight(1f, fill = true)) {
+                Text(
+                    text = crash,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .heightIn(min = 240.dp)
+                        .verticalScroll(rememberScrollState()),
+                    style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace),
+                    color = MaterialTheme.colorScheme.onSurface
+                )
+            }
+
+            RSPrimaryButton(
+                text = "Clear & Relaunch",
+                onClick = onClear,
+                modifier = Modifier.fillMaxWidth()
+            )
         }
     }
 }
@@ -255,14 +275,12 @@ private fun ErrorDialog(message: String, onDismiss: () -> Unit) {
         onDismissRequest = onDismiss,
         title = { Text("Heads up") },
         text = { Text(message) },
-        confirmButton = {
-            TextButton(onClick = onDismiss) { Text("OK") }
-        }
+        confirmButton = { TextButton(onClick = onDismiss) { Text("OK") } }
     )
 }
 
 /* ---------------------------
-   Crop helper (pixel-rect)
+   Crop helper
    --------------------------- */
 
 private fun cropBitmapSafe(src: Bitmap, r: android.graphics.Rect): Bitmap {
