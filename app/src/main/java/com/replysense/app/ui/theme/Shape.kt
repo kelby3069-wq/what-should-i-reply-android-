@@ -5,10 +5,10 @@ import androidx.compose.material3.Shapes
 import androidx.compose.ui.unit.dp
 
 /**
- * Shape philosophy:
- * - Premium apps lean on consistent rounded geometry.
- * - 12dp small for inputs/chips, 16dp medium for cards/buttons,
- *   24dp large for sheets/dialogs/cropper surfaces.
+ * Corner philosophy:
+ * - Small elements: 12dp
+ * - Buttons/cards: 16dp
+ * - Sheets/dialogs: 24dp
  */
 val AppShapes = Shapes(
     extraSmall = RoundedCornerShape(10.dp),
