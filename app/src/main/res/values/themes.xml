@@ -1,7 +1,18 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
+
+    <!-- App theme (Material 3, no ActionBar). Uses Material defaults so it won't
+         crash CI if md_theme_* colors aren't present. -->
     <style name="Theme.ReplySense" parent="Theme.Material3.DayNight.NoActionBar">
-        <item name="colorPrimary">@color/md_theme_primary</item>
-        <item name="colorOnPrimary">@color/md_theme_onPrimary</item>
+        <!-- Status bar / nav bar sane defaults -->
+        <item name="android:statusBarColor">@android:color/transparent</item>
+        <item name="android:navigationBarColor">@android:color/transparent</item>
+
+        <!-- Optional: if you use edge-to-edge + light/dark icons, you can tune these later -->
+        <item name="android:windowLightStatusBar">?attr/isLightTheme</item>
+        <item name="android:windowLightNavigationBar">?attr/isLightTheme</item>
+
+        <!-- Ripple/selection comes from Material defaults -->
     </style>
+
 </resources>
