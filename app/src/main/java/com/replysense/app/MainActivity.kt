@@ -40,11 +40,14 @@ private fun ReplySenseApp() {
 
     var rawText by remember { mutableStateOf("") }
     var messages by remember { mutableStateOf<List<OcrPostProcess.Msg>>(emptyList()) }
+
+    // UI selection (optional)
     var selectedMsgId by remember { mutableStateOf<Int?>(null) }
 
-    var replyTarget by remember { mutableStateOf(ReplyTarget.LAST_INCOMING) }
-    var tone by remember { mutableStateOf(Tone.FLIRTY) }
+    // ✅ NEW: computed “last THEM” target id
+    var lastThemId by remember { mutableStateOf<Int?>(null) }
 
+    var tone by remember { mutableStateOf(Tone.FLIRTY) }
     var generatedReply by remember { mutableStateOf("") }
     var transcript by remember { mutableStateOf("") }
     var json by remember { mutableStateOf("") }
@@ -61,9 +64,18 @@ private fun ReplySenseApp() {
     fun rebuildDebug() {
         transcript = messages.joinToString("\n") { m ->
             val who = if (m.dir == OcrPostProcess.Dir.THEM) "THEM" else "ME"
-            "$who: ${m.text}"
+            val tag = if (m.id == lastThemId) "  ← target" else ""
+            "$who: ${m.text}$tag"
         }
         json = messagesToJson(messages)
+    }
+
+    fun recomputeTargets() {
+        lastThemId = messages.lastOrNull { it.dir == OcrPostProcess.Dir.THEM }?.id
+        // Default UI selection:
+        // - If there’s a THEM bubble, select it (best default)
+        // - Otherwise select the last message
+        selectedMsgId = lastThemId ?: messages.lastOrNull()?.id
     }
 
     fun runOcr(bitmap: Bitmap) {
@@ -74,7 +86,6 @@ private fun ReplySenseApp() {
             .addOnSuccessListener { result ->
                 rawText = result.text ?: ""
 
-                // ✅ NEW: bubble-aware splitter
                 val extracted = OcrLayoutCluster.extractMessages(
                     result = result,
                     imageWidthPx = bitmap.width,
@@ -82,7 +93,6 @@ private fun ReplySenseApp() {
                 )
 
                 messages = if (extracted.isNotEmpty()) extracted else {
-                    // Fallback to old pipeline if clustering returns nothing
                     OcrPostProcess.processThreadAware(
                         input = rawText,
                         clean = true,
@@ -91,32 +101,44 @@ private fun ReplySenseApp() {
                     ).messages
                 }
 
-                selectedMsgId = messages.firstOrNull()?.id
                 generatedReply = ""
+                recomputeTargets()
                 rebuildDebug()
             }
             .addOnFailureListener { e ->
                 rawText = "OCR error: ${e.message ?: e.javaClass.simpleName}"
                 messages = emptyList()
                 selectedMsgId = null
+                lastThemId = null
                 transcript = ""
                 json = ""
                 generatedReply = ""
             }
     }
 
-    fun currentSelectedText(): String? =
-        messages.firstOrNull { it.id == selectedMsgId }?.text
+    fun toggleDir(id: Int) {
+        messages = OcrPostProcess.toggleDir(messages, id)
+        recomputeTargets()
+        rebuildDebug()
+    }
 
-    fun replySourceText(): String? = when (replyTarget) {
-        ReplyTarget.SELECTED -> currentSelectedText()
-        ReplyTarget.LAST_INCOMING -> OcrPostProcess.lastIncomingText(messages)
+    fun targetTextPreferThem(): String? {
+        // ✅ Always try last THEM first
+        val them = lastThemId?.let { id -> messages.firstOrNull { it.id == id }?.text }
+        if (!them.isNullOrBlank()) return them
+
+        // fallback: selected
+        val sel = selectedMsgId?.let { id -> messages.firstOrNull { it.id == id }?.text }
+        if (!sel.isNullOrBlank()) return sel
+
+        // fallback: last message
+        return messages.lastOrNull()?.text
     }
 
     fun generateReply() {
-        val src = replySourceText()?.trim().orEmpty()
+        val src = targetTextPreferThem()?.trim().orEmpty()
         if (src.isBlank()) {
-            generatedReply = "Pick a message (and mark THEM/ME if needed)."
+            generatedReply = "No message found. Try cropping tighter to the chat bubble area."
             return
         }
         generatedReply = LocalReplyEngine.generate(src, tone)
@@ -126,23 +148,7 @@ private fun ReplySenseApp() {
         Scaffold(
             topBar = {
                 TopAppBar(
-                    title = { Text("ReplySense OCR") },
-                    actions = {
-                        AssistChip(
-                            onClick = {
-                                replyTarget =
-                                    if (replyTarget == ReplyTarget.LAST_INCOMING) ReplyTarget.SELECTED
-                                    else ReplyTarget.LAST_INCOMING
-                            },
-                            label = {
-                                Text(
-                                    if (replyTarget == ReplyTarget.LAST_INCOMING) "Reply: Last THEM"
-                                    else "Reply: Selected"
-                                )
-                            }
-                        )
-                        Spacer(Modifier.width(12.dp))
-                    }
+                    title = { Text("ReplySense OCR") }
                 )
             }
         ) { pad ->
@@ -164,6 +170,32 @@ private fun ReplySenseApp() {
 
                 ToneRow(tone = tone, onTone = { tone = it })
 
+                Spacer(Modifier.height(12.dp))
+
+                // ✅ NEW: Target status + quick action
+                if (messages.isNotEmpty()) {
+                    val targetPreview = targetTextPreferThem()?.take(80)?.let { if (it.length == 80) "$it…" else it } ?: "—"
+                    ElevatedCard(Modifier.fillMaxWidth()) {
+                        Column(Modifier.padding(12.dp)) {
+                            Text("Reply target (auto)", fontWeight = FontWeight.SemiBold)
+                            Spacer(Modifier.height(6.dp))
+                            Text(targetPreview)
+                            Spacer(Modifier.height(10.dp))
+                            Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                                Button(
+                                    onClick = {
+                                        // jump selection to last THEM
+                                        selectedMsgId = lastThemId ?: selectedMsgId
+                                    },
+                                    enabled = lastThemId != null
+                                ) { Text("Select last THEM") }
+
+                                OutlinedButton(onClick = { generateReply() }) { Text("Reply now") }
+                            }
+                        }
+                    }
+                }
+
                 Spacer(Modifier.height(16.dp))
 
                 Text("Messages (tap one)", fontWeight = FontWeight.SemiBold)
@@ -177,11 +209,9 @@ private fun ReplySenseApp() {
                             MessageCard(
                                 msg = m,
                                 selected = (m.id == selectedMsgId),
+                                isTarget = (m.id == lastThemId),
                                 onSelect = { selectedMsgId = m.id },
-                                onToggleDir = {
-                                    messages = OcrPostProcess.toggleDir(messages, m.id)
-                                    rebuildDebug()
-                                }
+                                onToggleDir = { toggleDir(m.id) }
                             )
                         }
                     }
@@ -209,7 +239,7 @@ private fun ReplySenseApp() {
 
                 Text("Debug", fontWeight = FontWeight.SemiBold)
                 Spacer(Modifier.height(6.dp))
-                Text("Raw: ${rawText.length} | Messages: ${messages.size}")
+                Text("Raw: ${rawText.length} | Messages: ${messages.size} | Target: ${lastThemId ?: "—"}")
 
                 Spacer(Modifier.height(8.dp))
                 ElevatedCard(Modifier.fillMaxWidth()) {
@@ -259,6 +289,7 @@ private fun ToneRow(tone: Tone, onTone: (Tone) -> Unit) {
 private fun MessageCard(
     msg: OcrPostProcess.Msg,
     selected: Boolean,
+    isTarget: Boolean,
     onSelect: () -> Unit,
     onToggleDir: () -> Unit
 ) {
@@ -274,6 +305,7 @@ private fun MessageCard(
                     label = { Text(if (msg.dir == OcrPostProcess.Dir.THEM) "THEM" else "ME") }
                 )
                 if (selected) AssistChip(onClick = {}, label = { Text("Selected") })
+                if (isTarget) AssistChip(onClick = {}, label = { Text("Target") })
             }
             Spacer(Modifier.height(8.dp))
             Text(text = msg.text, fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal)
@@ -281,7 +313,6 @@ private fun MessageCard(
     }
 }
 
-private enum class ReplyTarget { LAST_INCOMING, SELECTED }
 private enum class Tone { CHILL, FLIRTY, FIRM }
 
 private object LocalReplyEngine {
