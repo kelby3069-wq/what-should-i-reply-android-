@@ -5,10 +5,8 @@ import androidx.room.PrimaryKey
 
 @Entity(tableName = "reply_history")
 data class ReplyHistoryEntity(
-    @PrimaryKey(autoGenerate = true) val id: Long = 0,
-    val createdAtMs: Long,
-    val isFavorite: Boolean,
-    val conversationJson: String,
-    val requestJson: String,
-    val responseJson: String
+    @PrimaryKey(autoGenerate = true) val id: Long = 0L,
+    val createdAtEpochMs: Long,
+    val message: String,
+    val selectedReply: String
 )
