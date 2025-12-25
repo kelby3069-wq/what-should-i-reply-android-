@@ -17,6 +17,9 @@ android {
     }
 
     buildTypes {
+        debug {
+            isMinifyEnabled = false
+        }
         release {
             isMinifyEnabled = false
             proguardFiles(
@@ -24,7 +27,6 @@ android {
                 "proguard-rules.pro"
             )
         }
-        debug { isMinifyEnabled = false }
     }
 
     compileOptions {
@@ -34,7 +36,11 @@ android {
 
     kotlin { jvmToolchain(17) }
 
-    buildFeatures { compose = true }
+    buildFeatures {
+        compose = true
+        // ✅ This fixes "Unresolved reference BuildConfig"
+        buildConfig = true
+    }
 
     packaging {
         resources {
@@ -64,7 +70,7 @@ dependencies {
     debugImplementation("androidx.compose.ui:ui-tooling")
     debugImplementation("androidx.compose.ui:ui-test-manifest")
 
-    // ✅ This provides Theme.Material3.* XML themes for your themes.xml parent
+    // ✅ Required because your XML theme parent is Theme.Material3.*
     implementation("com.google.android.material:material:1.13.0")
 
     implementation("com.google.mlkit:text-recognition:16.0.1")
