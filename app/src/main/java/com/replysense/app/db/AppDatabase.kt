@@ -11,18 +11,21 @@ import androidx.room.RoomDatabase
     exportSchema = false
 )
 abstract class AppDatabase : RoomDatabase() {
-    abstract fun historyDao(): ReplyHistoryDao
+    abstract fun replyHistoryDao(): ReplyHistoryDao
 
     companion object {
         @Volatile private var INSTANCE: AppDatabase? = null
 
-        fun get(context: Context): AppDatabase =
-            INSTANCE ?: synchronized(this) {
+        fun get(context: Context): AppDatabase {
+            return INSTANCE ?: synchronized(this) {
                 INSTANCE ?: Room.databaseBuilder(
                     context.applicationContext,
                     AppDatabase::class.java,
-                    "reply_sense.db"
-                ).build().also { INSTANCE = it }
+                    "replysense.db"
+                ).fallbackToDestructiveMigration()
+                    .build()
+                    .also { INSTANCE = it }
             }
+        }
     }
 }
