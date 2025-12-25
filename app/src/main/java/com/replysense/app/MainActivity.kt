@@ -21,7 +21,9 @@ import androidx.compose.ui.unit.dp
 import com.google.mlkit.vision.common.InputImage
 import com.google.mlkit.vision.text.TextRecognition
 import com.google.mlkit.vision.text.latin.TextRecognizerOptions
-import java.util.Locale
+import com.replysense.app.ui.CropperDialog
+import com.replysense.app.util.OcrPostProcess
+import kotlin.math.roundToInt
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -45,10 +47,20 @@ private fun OcrScreen() {
     val context = LocalContext.current
 
     var selectedUri by remember { mutableStateOf<Uri?>(null) }
+    var selectedBitmap by remember { mutableStateOf<Bitmap?>(null) }
+
     var isWorking by remember { mutableStateOf(false) }
     var rawText by remember { mutableStateOf("") }
-    var showCleaned by remember { mutableStateOf(true) }
     var errorText by remember { mutableStateOf<String?>(null) }
+
+    // ✅ The “3 options”
+    var useCrop by remember { mutableStateOf(true) }
+    var useClean by remember { mutableStateOf(true) }
+    var useMerge by remember { mutableStateOf(true) }
+
+    // Crop UI state
+    var showCropper by remember { mutableStateOf(false) }
+    var cropBitmap by remember { mutableStateOf<Bitmap?>(null) }
 
     val pickImage = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.GetContent()
@@ -56,32 +68,17 @@ private fun OcrScreen() {
         selectedUri = uri
         rawText = ""
         errorText = null
-    }
-
-    fun decodeBitmap(uri: Uri): Bitmap {
-        return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
-            val source = ImageDecoder.createSource(context.contentResolver, uri)
-            ImageDecoder.decodeBitmap(source) { decoder, _, _ ->
-                decoder.isMutableRequired = false
-            }
-        } else {
-            @Suppress("DEPRECATION")
-            MediaStore.Images.Media.getBitmap(context.contentResolver, uri)
+        cropBitmap = null
+        selectedBitmap = uri?.let { decodeBitmap(context, it) }
+        if (useCrop && selectedBitmap != null) {
+            showCropper = true
         }
     }
 
-    fun runOcr(uri: Uri) {
+    fun runOcr(bitmap: Bitmap) {
         isWorking = true
         errorText = null
         rawText = ""
-
-        val bitmap = try {
-            decodeBitmap(uri)
-        } catch (t: Throwable) {
-            isWorking = false
-            errorText = "Couldn’t decode image: ${t.message ?: t.javaClass.simpleName}"
-            return
-        }
 
         val image = InputImage.fromBitmap(bitmap, 0)
         val recognizer = TextRecognition.getClient(TextRecognizerOptions.DEFAULT_OPTIONS)
@@ -97,11 +94,28 @@ private fun OcrScreen() {
             }
     }
 
-    val displayText = remember(rawText, showCleaned) {
+    val processedText = remember(rawText, useClean, useMerge) {
         val t = rawText.trim()
-        if (t.isEmpty()) "(empty)"
-        else if (!showCleaned) t
-        else cleanOcrText(t).ifBlank { "(Nothing useful after cleanup)" }
+        if (t.isEmpty()) "" else OcrPostProcess.process(t, clean = useClean, mergeLines = useMerge)
+    }
+
+    val displayText = when {
+        errorText != null -> errorText!!
+        rawText.isBlank() -> "(empty)"
+        processedText.isBlank() -> "(Nothing useful after processing)"
+        else -> processedText
+    }
+
+    if (showCropper && selectedBitmap != null) {
+        CropperDialog(
+            title = "Crop to chat area",
+            bitmap = selectedBitmap!!,
+            onCancel = { showCropper = false },
+            onConfirm = { cropped ->
+                cropBitmap = cropped
+                showCropper = false
+            }
+        )
     }
 
     Scaffold(
@@ -116,37 +130,57 @@ private fun OcrScreen() {
             verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
             Text(
-                "Pick a screenshot. We OCR it and (optionally) clean the junk UI text.",
+                "Pick a screenshot → optionally crop → OCR → optionally clean + merge lines.",
                 style = MaterialTheme.typography.bodyMedium
             )
 
             Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                Button(onClick = { pickImage.launch("image/*") }) { Text("Pick image") }
+                Button(onClick = { pickImage.launch("image/*") }, enabled = !isWorking) {
+                    Text("Pick image")
+                }
 
                 Button(
-                    onClick = { selectedUri?.let { runOcr(it) } },
-                    enabled = selectedUri != null && !isWorking
+                    onClick = {
+                        val bmp = (cropBitmap ?: selectedBitmap)
+                        if (bmp != null) runOcr(bmp)
+                        else errorText = "Pick an image first."
+                    },
+                    enabled = !isWorking
                 ) {
                     Text(if (isWorking) "Working…" else "Run OCR")
                 }
+
+                OutlinedButton(
+                    onClick = { if (selectedBitmap != null) showCropper = true },
+                    enabled = selectedBitmap != null && !isWorking
+                ) {
+                    Text("Crop")
+                }
             }
 
-            Row(
-                horizontalArrangement = Arrangement.spacedBy(12.dp),
-                modifier = Modifier.fillMaxWidth()
-            ) {
+            // Toggles (the “3 options”)
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
                 FilterChip(
-                    selected = showCleaned,
-                    onClick = { showCleaned = !showCleaned },
-                    label = { Text(if (showCleaned) "Cleaned" else "Raw") }
+                    selected = useCrop,
+                    onClick = { useCrop = !useCrop },
+                    label = { Text("Crop") }
+                )
+                FilterChip(
+                    selected = useClean,
+                    onClick = { useClean = !useClean },
+                    label = { Text("Clean") }
+                )
+                FilterChip(
+                    selected = useMerge,
+                    onClick = { useMerge = !useMerge },
+                    label = { Text("Merge lines") }
                 )
             }
 
-            if (errorText != null) {
+            if (useCrop && selectedBitmap != null && cropBitmap == null) {
                 Text(
-                    text = errorText!!,
-                    color = MaterialTheme.colorScheme.error,
-                    style = MaterialTheme.typography.bodyMedium
+                    "Tip: Tap “Crop” and box the chat area for way cleaner extraction.",
+                    style = MaterialTheme.typography.bodySmall
                 )
             }
 
@@ -157,72 +191,50 @@ private fun OcrScreen() {
                     Text(displayText, style = MaterialTheme.typography.bodySmall)
                 }
             }
+
+            if (rawText.isNotBlank()) {
+                Divider()
+                Text("Debug", style = MaterialTheme.typography.titleSmall)
+                Text(
+                    "Raw length: ${rawText.length}, Processed length: ${processedText.length}",
+                    style = MaterialTheme.typography.bodySmall
+                )
+            }
         }
     }
 }
 
+private fun decodeBitmap(context: android.content.Context, uri: Uri): Bitmap {
+    return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+        val source = ImageDecoder.createSource(context.contentResolver, uri)
+        ImageDecoder.decodeBitmap(source) { decoder, _, _ ->
+            decoder.isMutableRequired = false
+        }
+    } else {
+        @Suppress("DEPRECATION")
+        MediaStore.Images.Media.getBitmap(context.contentResolver, uri)
+    }
+}
+
 /**
- * Simple, brutal OCR cleanup tuned for chat/screenshot OCR:
- * - drops keyboard rows
- * - drops obvious UI chrome (Active Now, Message, language)
- * - drops lone digits (often keyboard index labels)
- * - removes repeated short garbage lines
+ * Crop a bitmap using normalized [0..1] rect values.
  */
-private fun cleanOcrText(input: String): String {
-    val lines = input
-        .replace("\r\n", "\n")
-        .split('\n')
-        .map { it.trim() }
-        .filter { it.isNotBlank() }
+internal fun cropBitmapNormalized(
+    src: Bitmap,
+    leftN: Float,
+    topN: Float,
+    rightN: Float,
+    bottomN: Float
+): Bitmap {
+    val left = (leftN.coerceIn(0f, 1f) * src.width).roundToInt()
+    val top = (topN.coerceIn(0f, 1f) * src.height).roundToInt()
+    val right = (rightN.coerceIn(0f, 1f) * src.width).roundToInt()
+    val bottom = (bottomN.coerceIn(0f, 1f) * src.height).roundToInt()
 
-    val blacklistExact = setOf(
-        "active now",
-        "message",
-        "english (us)",
-        "search",
-        "home",
-        "back"
-    )
+    val x = left.coerceIn(0, src.width - 1)
+    val y = top.coerceIn(0, src.height - 1)
+    val w = (right - left).coerceAtLeast(1).coerceAtMost(src.width - x)
+    val h = (bottom - top).coerceAtLeast(1).coerceAtMost(src.height - y)
 
-    // Keyboard-ish lines: lots of single letters separated by spaces, e.g. "Q W E R T Y"
-    fun isKeyboardRow(s: String): Boolean {
-        val noDots = s.replace(".", "")
-        val tokens = noDots.split(Regex("\\s+")).filter { it.isNotBlank() }
-        if (tokens.size < 6) return false
-        val singleLetter = tokens.count { it.length == 1 && it[0].isLetter() }
-        return singleLetter >= 6
-    }
-
-    // Lone digits are often keyboard row labels in OCR output from screenshots
-    fun isLoneDigitLine(s: String): Boolean = s.length <= 2 && s.all { it.isDigit() }
-
-    // Time lines like "12:38 AM" / "2:18" etc.
-    val timeRegex = Regex("""^\d{1,2}:\d{2}\s?(AM|PM)?$""", RegexOption.IGNORE_CASE)
-
-    // Remove super-short noise lines that are just symbols
-    fun isSymbolNoise(s: String): Boolean =
-        s.length <= 2 && s.any { !it.isLetterOrDigit() } && s.all { !it.isLetterOrDigit() || it == '+' }
-
-    val cleaned = mutableListOf<String>()
-    for (raw in lines) {
-        val s = raw.trim()
-        val lower = s.lowercase(Locale.US)
-
-        if (blacklistExact.contains(lower)) continue
-        if (isKeyboardRow(s)) continue
-        if (isLoneDigitLine(s)) continue
-        if (timeRegex.matches(s)) continue
-        if (isSymbolNoise(s)) continue
-
-        // Drop lines that are basically “divider” OCR like "||" etc.
-        if (lower == "||" || lower == "|" || lower == "ll") continue
-
-        cleaned += s
-    }
-
-    // Collapse multiple blank-ish / repeated garbage
-    return cleaned
-        .joinToString("\n")
-        .replace(Regex("\n{3,}"), "\n\n")
-        .trim()
+    return Bitmap.createBitmap(src, x, y, w, h)
 }
