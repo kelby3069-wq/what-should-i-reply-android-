@@ -24,15 +24,9 @@ import androidx.compose.ui.platform.LocalHapticFeedback
 import kotlin.math.*
 
 /**
- * Premium iOS/IG-style crop overlay + micro-motion + haptics:
- * - Image displayed with ContentScale.Fit (never shows app UI in hole)
- * - Dim outside + hole punch via BlendMode.Clear (Offscreen compositing)
- * - Drag inside to move
- * - Drag corner handles to resize (fat hit targets)
- * - Haptics: start / mode-change / release
- * - Micro motion: border/glow/grid fade + subtle settle on release
+ * Premium iOS/IG-style crop overlay + micro-motion + haptics + pressed active handle + parallax dim.
  *
- * rect is normalized [0..1] relative to the displayed image rect.
+ * rect is normalized [0..1] relative to the displayed image rect (ContentScale.Fit).
  */
 @Composable
 fun CropperUi(
@@ -74,59 +68,70 @@ private fun PremiumOverlay(
 ) {
     val haptics = LocalHapticFeedback.current
 
-    // Live (raw) rect while user drags; we drive a "settle" animation on release
-    var liveRect by remember { mutableStateOf(rect) }
-    LaunchedEffect(rect) {
-        // Keep liveRect in sync if parent changes rect
-        if (!draggingState) liveRect = rect
-    }
-
-    var draggingState by remember { mutableStateOf(false) }
+    var dragging by remember { mutableStateOf(false) }
     var dragMode by remember { mutableStateOf(DragMode.None) }
     var lastMode by remember { mutableStateOf(DragMode.None) }
 
-    // Animated rect for settle micro-motion (only visible when not dragging)
+    // Track drag direction for parallax dim (normalized-ish; we cap it hard)
+    var dragVelocity by remember { mutableStateOf(Offset.Zero) }
+
+    // Live rect during drag
+    var liveRect by remember { mutableStateOf(rect) }
+
+    // Keep in sync if parent changes rect while idle
+    LaunchedEffect(rect) {
+        if (!dragging) liveRect = rect
+    }
+
+    // Animate settle when not dragging
     val settleRect by animateRectAsState(
-        targetValue = if (draggingState) liveRect else liveRect.normalized().clamp01().enforceMinSize(0.12f),
+        targetValue = if (dragging) liveRect else liveRect.normalized().clamp01().enforceMinSize(0.12f),
         animationSpec = spring(stiffness = Spring.StiffnessMediumLow, dampingRatio = 0.82f),
         label = "settleRect"
     )
 
-    // Micro motion: dim and border/glow intensity
+    // Micro motion states
     val dimAlpha by animateFloatAsState(
-        targetValue = if (draggingState) 0.60f else 0.56f,
+        targetValue = if (dragging) 0.60f else 0.56f,
         animationSpec = spring(stiffness = Spring.StiffnessLow),
         label = "dimAlpha"
     )
 
     val borderAlpha by animateFloatAsState(
-        targetValue = if (draggingState) 1f else 0.88f,
+        targetValue = if (dragging) 1f else 0.88f,
         animationSpec = spring(stiffness = Spring.StiffnessMediumLow),
         label = "borderAlpha"
     )
 
     val glowAlpha by animateFloatAsState(
-        targetValue = if (draggingState) 0.36f else 0.0f,
+        targetValue = if (dragging) 0.36f else 0.0f,
         animationSpec = spring(stiffness = Spring.StiffnessLow),
         label = "glowAlpha"
     )
 
     val gridAlpha by animateFloatAsState(
-        targetValue = if (draggingState) 0.26f else 0.18f,
+        targetValue = if (dragging) 0.26f else 0.18f,
         animationSpec = spring(stiffness = Spring.StiffnessLow),
         label = "gridAlpha"
     )
 
-    val handleAlpha by animateFloatAsState(
-        targetValue = if (draggingState) 1f else 0.96f,
-        animationSpec = spring(stiffness = Spring.StiffnessMediumLow),
-        label = "handleAlpha"
+    // Pressed handle factor based on mode (0..1)
+    val handlePress by animateFloatAsState(
+        targetValue = if (dragging && dragMode.isCorner()) 1f else 0f,
+        animationSpec = spring(stiffness = Spring.StiffnessMediumLow, dampingRatio = 0.78f),
+        label = "handlePress"
+    )
+
+    // Parallax factor: only when dragging; drives a small offset for the dim layer.
+    val parallax by animateFloatAsState(
+        targetValue = if (dragging) 1f else 0f,
+        animationSpec = spring(stiffness = Spring.StiffnessLow, dampingRatio = 0.9f),
+        label = "parallax"
     )
 
     Canvas(
         modifier = Modifier
             .fillMaxSize()
-            // hole-punch reliably
             .graphicsLayer { compositingStrategy = CompositingStrategy.Offscreen }
             .pointerInput(Unit) {
                 detectDragGestures(
@@ -142,34 +147,34 @@ private fun PremiumOverlay(
 
                         dragMode = mode
                         lastMode = mode
-                        draggingState = (mode != DragMode.None)
+                        dragging = (mode != DragMode.None)
 
-                        if (draggingState) {
-                            // start tick
-                            haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                        }
-
-                        // initialize live rect from current rect at drag start
+                        dragVelocity = Offset.Zero
                         liveRect = settleRect
+
+                        if (dragging) {
+                            haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove) // grab
+                        }
                     },
                     onDragEnd = {
-                        if (draggingState) {
-                            // release tick
-                            haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                        if (dragging) {
+                            haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove) // release
                         }
-                        draggingState = false
+                        dragging = false
                         dragMode = DragMode.None
                         lastMode = DragMode.None
+                        dragVelocity = Offset.Zero
 
-                        // push a final, clamped rect back up so model stays clean
+                        // Push final clamped rect to model
                         val final = liveRect.normalized().clamp01().enforceMinSize(0.12f)
                         liveRect = final
                         onRectChange(final)
                     },
                     onDragCancel = {
-                        draggingState = false
+                        dragging = false
                         dragMode = DragMode.None
                         lastMode = DragMode.None
+                        dragVelocity = Offset.Zero
 
                         val final = liveRect.normalized().clamp01().enforceMinSize(0.12f)
                         liveRect = final
@@ -187,14 +192,19 @@ private fun PremiumOverlay(
 
                         if (dragMode == DragMode.None) return@detectDragGestures
 
-                        // Detect if user's finger drifted close to a different handle while dragging:
-                        // (premium trick: allow mode switching without lifting finger)
+                        // Update drag velocity for parallax (smoothed, capped)
+                        dragVelocity = Offset(
+                            x = (dragVelocity.x * 0.82f + drag.x * 0.18f).coerceIn(-20f, 20f),
+                            y = (dragVelocity.y * 0.82f + drag.y * 0.18f).coerceIn(-20f, 20f)
+                        )
+
+                        // Allow mode switching mid-gesture by proximity
                         val cropPx = rectNormToPx(liveRect, imgRect)
-                        val modeNow = hitTest(change.position, cropPx).takeIf { it != DragMode.None } ?: dragMode
+                        val modeNow = hitTest(change.position, cropPx)
+                            .takeIf { it != DragMode.None } ?: dragMode
 
                         if (modeNow != lastMode) {
-                            // mode-change tick
-                            haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                            haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove) // mode change
                             lastMode = modeNow
                         }
                         dragMode = modeNow
@@ -220,7 +230,6 @@ private fun PremiumOverlay(
                             DragMode.None -> Unit
                         }
 
-                        // Keep it sane while dragging (prevents jumpy clamps)
                         n = n.normalized().clamp01().enforceMinSize(minSize)
 
                         liveRect = n
@@ -236,14 +245,23 @@ private fun PremiumOverlay(
             imageH = bitmapHeight
         )
 
-        // Use animated settleRect when idle, liveRect when dragging
-        val displayRect = if (draggingState) liveRect else settleRect
+        val displayRect = if (dragging) liveRect else settleRect
         val crop = rectNormToPx(displayRect, imgRect)
 
-        // ---- Dim outside (soft glass) ----
-        drawRect(Color.Black.copy(alpha = dimAlpha))
+        // ---- Parallax dim (tiny, capped) ----
+        // Translate dim layer a few pixels based on drag direction (felt, not seen).
+        val parallaxCap = 10f
+        val px = (dragVelocity.x * 0.18f).coerceIn(-parallaxCap, parallaxCap) * parallax
+        val py = (dragVelocity.y * 0.18f).coerceIn(-parallaxCap, parallaxCap) * parallax
 
-        // Hole punch (rounded corners)
+        // Dim whole screen with parallax offset
+        withTransform({
+            translate(left = px, top = py)
+        }) {
+            drawRect(Color.Black.copy(alpha = dimAlpha))
+        }
+
+        // Hole punch only inside displayed image rect
         clipRect(imgRect.left, imgRect.top, imgRect.right, imgRect.bottom) {
             drawRoundRect(
                 color = Color.Transparent,
@@ -263,7 +281,7 @@ private fun PremiumOverlay(
             style = Stroke(width = 10f)
         )
 
-        // Glow while active
+        // Active glow
         if (glowAlpha > 0f) {
             drawRoundRect(
                 color = Color(0xFF75A7FF).copy(alpha = glowAlpha),
@@ -274,7 +292,7 @@ private fun PremiumOverlay(
             )
         }
 
-        // Main border
+        // Border
         drawRoundRect(
             color = Color.White.copy(alpha = borderAlpha),
             topLeft = Offset(crop.left, crop.top),
@@ -305,24 +323,40 @@ private fun PremiumOverlay(
             }
         }
 
-        // Corner handles (visual shorter than hit target)
-        val handleLen = 26f
-        val stroke = 7f
-        val handleColor = Color.White.copy(alpha = handleAlpha)
+        // Handles: base values
+        val baseLen = 26f
+        val baseStroke = 7f
+        val pressedExtraLen = 4f
+        val pressedExtraStroke = 1.5f
 
-        fun corner(x: Float, y: Float, dx: Float, dy: Float) {
+        fun cornerHandle(
+            which: DragMode,
+            x: Float,
+            y: Float,
+            dx: Float,
+            dy: Float
+        ) {
+            val isActive = dragging && (dragMode == which)
+            val press = if (isActive) handlePress else 0f
+
+            val len = baseLen + pressedExtraLen * press
+            val stroke = baseStroke + pressedExtraStroke * press
+            val alpha = if (isActive) 1f else 0.96f
+
+            val handleColor = Color.White.copy(alpha = alpha)
             val cap = 2.5f
-            drawLine(handleColor, Offset(x - cap * dx, y), Offset(x + dx * handleLen, y), stroke)
-            drawLine(handleColor, Offset(x, y - cap * dy), Offset(x, y + dy * handleLen), stroke)
+
+            drawLine(handleColor, Offset(x - cap * dx, y), Offset(x + dx * len, y), stroke)
+            drawLine(handleColor, Offset(x, y - cap * dy), Offset(x, y + dy * len), stroke)
         }
 
-        corner(crop.left, crop.top, +1f, +1f)
-        corner(crop.right, crop.top, -1f, +1f)
-        corner(crop.left, crop.bottom, +1f, -1f)
-        corner(crop.right, crop.bottom, -1f, -1f)
+        cornerHandle(DragMode.TL, crop.left, crop.top, +1f, +1f)
+        cornerHandle(DragMode.TR, crop.right, crop.top, -1f, +1f)
+        cornerHandle(DragMode.BL, crop.left, crop.bottom, +1f, -1f)
+        cornerHandle(DragMode.BR, crop.right, crop.bottom, -1f, -1f)
 
-        // Idle center grab hint
-        if (!draggingState) {
+        // Idle center hint
+        if (!dragging) {
             val cx = (crop.left + crop.right) / 2f
             val cy = (crop.top + crop.bottom) / 2f
             val w = min(120f, crop.width * 0.45f)
@@ -335,6 +369,9 @@ private fun PremiumOverlay(
 /* -----------------------------
    Hit testing / Geometry
    ----------------------------- */
+
+private fun DragMode.isCorner(): Boolean =
+    this == DragMode.TL || this == DragMode.TR || this == DragMode.BR || this == DragMode.BL
 
 private fun hitTest(pos: Offset, crop: Rect): DragMode {
     val c = crop.corners()
