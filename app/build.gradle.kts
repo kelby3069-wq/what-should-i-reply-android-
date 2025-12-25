@@ -1,7 +1,7 @@
 plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.android")
-    id("org.jetbrains.kotlin.plugin.compose")
+    id("org.jetbrains.kotlin.plugin.serialization") // ✅ REQUIRED
 }
 
 android {
@@ -14,60 +14,36 @@ android {
         targetSdk = 34
         versionCode = 1
         versionName = "1.0"
-        testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
-
-        vectorDrawables {
-            useSupportLibrary = true
-        }
     }
 
-    buildTypes {
-        debug { isMinifyEnabled = false }
-        release {
-            isMinifyEnabled = false
-            proguardFiles(
-                getDefaultProguardFile("proguard-android-optimize.txt"),
-                "proguard-rules.pro"
-            )
-        }
+    buildFeatures {
+        compose = true
+        buildConfig = true // ✅ FIX BuildConfig unresolved
     }
 
-    compileOptions {
-        sourceCompatibility = JavaVersion.VERSION_17
-        targetCompatibility = JavaVersion.VERSION_17
+    composeOptions {
+        kotlinCompilerExtensionVersion = "1.5.14"
     }
-    kotlinOptions { jvmTarget = "17" }
 
-    buildFeatures { compose = true }
-
-    packaging {
-        resources {
-            excludes += "/META-INF/{AL2.0,LGPL2.1}"
-        }
+    kotlinOptions {
+        jvmTarget = "17"
     }
 }
 
 dependencies {
-    /* Core */
-    implementation("androidx.core:core-ktx:1.13.1")
-    implementation("androidx.lifecycle:lifecycle-runtime-ktx:2.8.4")
-    implementation("androidx.activity:activity-compose:1.9.2")
 
-    /* ✅ Needed for Theme.MaterialComponents.* in XML */
-    implementation("com.google.android.material:material:1.12.0")
-
-    /* Compose BOM */
-    implementation(platform("androidx.compose:compose-bom:2024.09.00"))
-    androidTestImplementation(platform("androidx.compose:compose-bom:2024.09.00"))
-
+    /* =======================
+       Compose Core
+       ======================= */
+    implementation("androidx.activity:activity-compose:1.9.3")
     implementation("androidx.compose.ui:ui")
-    implementation("androidx.compose.ui:ui-graphics")
     implementation("androidx.compose.ui:ui-tooling-preview")
+    implementation("androidx.compose.foundation:foundation")
 
-    /* Material 3 (Compose) */
+    /* =======================
+       Material 3 (Compose)
+       ======================= */
     implementation("androidx.compose.material3:material3")
-
-    /* (Optional) can keep this; harmless even if it wasn’t solving XML themes */
     implementation("androidx.compose.material3:material3-android")
 
     /* Icons */
@@ -77,9 +53,18 @@ dependencies {
     debugImplementation("androidx.compose.ui:ui-tooling")
     debugImplementation("androidx.compose.ui:ui-test-manifest")
 
-    /* Testing */
-    testImplementation("junit:junit:4.13.2")
-    androidTestImplementation("androidx.test.ext:junit:1.2.1")
-    androidTestImplementation("androidx.test.espresso:espresso-core:3.6.1")
-    androidTestImplementation("androidx.compose.ui:ui-test-junit4")
+    /* =======================
+       Kotlin Serialization
+       ======================= */
+    implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.6.3")
+
+    /* =======================
+       ML Kit – Text Recognition
+       ======================= */
+    implementation("com.google.mlkit:text-recognition:16.0.0")
+
+    /* =======================
+       Image / Bitmap
+       ======================= */
+    implementation("androidx.core:core-ktx:1.13.1")
 }
