@@ -1,159 +1,86 @@
 package com.replysense.app.ui.crop
 
-import androidx.compose.animation.core.Spring
-import androidx.compose.animation.core.animateFloatAsState
-import androidx.compose.animation.core.spring
+import android.graphics.Bitmap
 import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.detectDragGestures
-import androidx.compose.foundation.layout.*
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Surface
-import androidx.compose.material3.Text
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.*
-import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Rect
-import androidx.compose.ui.geometry.Size
-import androidx.compose.ui.graphics.*
-import androidx.compose.ui.graphics.drawscope.Stroke
-import androidx.compose.ui.graphics.graphicsLayer
-import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.input.pointer.pointerInput
-import androidx.compose.ui.platform.LocalHapticFeedback
-import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.IntSize
+import kotlin.math.max
+import kotlin.math.min
 
 @Composable
-fun PremiumCropOverlay(
-    modifier: Modifier = Modifier,
-    rect: Rect,
-    onRectChange: (Rect) -> Unit,
-    showGrid: Boolean = true
+fun CropperUi(
+    bitmap: Bitmap,
+    onCropRectChanged: (Rect) -> Unit
 ) {
-    val haptics = LocalHapticFeedback.current
-    var dragging by remember { mutableStateOf(false) }
+    var imageSize by remember { mutableStateOf(IntSize.Zero) }
 
-    val borderAlpha by animateFloatAsState(
-        targetValue = if (dragging) 1f else 0.85f,
-        animationSpec = spring(stiffness = Spring.StiffnessMediumLow),
-        label = "borderAlpha"
-    )
+    var cropRect by remember {
+        mutableStateOf(
+            Rect(200f, 200f, 800f, 800f)
+        )
+    }
 
-    Box(modifier = modifier.fillMaxSize()) {
-
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(Color.Black)
+    ) {
         Canvas(
             modifier = Modifier
                 .fillMaxSize()
-                .graphicsLayer { compositingStrategy = CompositingStrategy.Offscreen }
                 .pointerInput(Unit) {
-                    detectDragGestures(
-                        onDragStart = {
-                            dragging = true
-                            haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                        },
-                        onDragEnd = { dragging = false },
-                        onDragCancel = { dragging = false },
-                        onDrag = { change, drag ->
-                            change.consume()
+                    detectDragGestures { change, dragAmount ->
+                        change.consume()
 
-                            val dx = drag.x / size.width
-                            val dy = drag.y / size.height
+                        val newRect = Rect(
+                            left = cropRect.left + dragAmount.x,
+                            top = cropRect.top + dragAmount.y,
+                            right = cropRect.right + dragAmount.x,
+                            bottom = cropRect.bottom + dragAmount.y
+                        )
 
-                            val w = rect.width
-                            val h = rect.height
-
-                            val left = (rect.left + dx).coerceIn(0f, 1f - w)
-                            val top = (rect.top + dy).coerceIn(0f, 1f - h)
-
-                            onRectChange(
-                                Rect(
-                                    left,
-                                    top,
-                                    left + w,
-                                    top + h
-                                )
-                            )
-                        }
-                    )
+                        cropRect = newRect
+                        onCropRectChanged(newRect)
+                    }
                 }
         ) {
-            val crop = Rect(
-                rect.left * size.width,
-                rect.top * size.height,
-                rect.right * size.width,
-                rect.bottom * size.height
+            imageSize = IntSize(size.width.toInt(), size.height.toInt())
+
+            // Draw screenshot bitmap
+            drawImage(
+                image = bitmap.asImageBitmap(),
+                dstSize = imageSize
             )
 
-            // Dim outside
-            drawRect(Color.Black.copy(alpha = 0.55f))
+            // Dim outside crop
+            drawRect(
+                color = Color.Black.copy(alpha = 0.55f)
+            )
 
-            // Punch hole
+            // Clear crop window
             drawRect(
                 color = Color.Transparent,
-                topLeft = Offset(crop.left, crop.top),
-                size = Size(crop.width, crop.height),
-                blendMode = BlendMode.Clear
+                topLeft = Offset(cropRect.left, cropRect.top),
+                size = cropRect.size,
+                blendMode = androidx.compose.ui.graphics.BlendMode.Clear
             )
 
-            // Border
-            drawRoundRect(
-                color = Color.White.copy(alpha = borderAlpha),
-                topLeft = Offset(crop.left, crop.top),
-                size = Size(crop.width, crop.height),
-                cornerRadius = CornerRadius(18f, 18f),
-                style = Stroke(width = 3f)
-            )
-
-            // Grid
-            if (showGrid) {
-                val thirdW = crop.width / 3f
-                val thirdH = crop.height / 3f
-                val gridColor = Color.White.copy(alpha = 0.22f)
-
-                for (i in 1..2) {
-                    drawLine(
-                        gridColor,
-                        Offset(crop.left + thirdW * i, crop.top),
-                        Offset(crop.left + thirdW * i, crop.bottom),
-                        strokeWidth = 2f
-                    )
-                    drawLine(
-                        gridColor,
-                        Offset(crop.left, crop.top + thirdH * i),
-                        Offset(crop.right, crop.top + thirdH * i),
-                        strokeWidth = 2f
-                    )
-                }
-            }
-
-            // Corner handles
-            val handle = 22f
-            val stroke = 6f
-
-            fun corner(x: Float, y: Float, dx: Float, dy: Float) {
-                drawLine(Color.White, Offset(x, y), Offset(x + dx * handle, y), stroke)
-                drawLine(Color.White, Offset(x, y), Offset(x, y + dy * handle), stroke)
-            }
-
-            corner(crop.left, crop.top, 1f, 1f)
-            corner(crop.right, crop.top, -1f, 1f)
-            corner(crop.left, crop.bottom, 1f, -1f)
-            corner(crop.right, crop.bottom, -1f, -1f)
-        }
-
-        Surface(
-            modifier = Modifier
-                .align(Alignment.TopCenter)
-                .padding(top = 14.dp),
-            shape = MaterialTheme.shapes.large,
-            color = MaterialTheme.colorScheme.surface.copy(alpha = 0.8f),
-            tonalElevation = 2.dp
-        ) {
-            Text(
-                "Drag to move",
-                modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
-                style = MaterialTheme.typography.labelMedium
+            // Crop border
+            drawRect(
+                color = Color.White,
+                topLeft = Offset(cropRect.left, cropRect.top),
+                size = cropRect.size,
+                style = androidx.compose.ui.graphics.drawscope.Stroke(width = 3f)
             )
         }
     }
