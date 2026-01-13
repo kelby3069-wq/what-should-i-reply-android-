@@ -1,19 +1,9 @@
 package com.replysense.app.ui.theme
 
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material3.Shapes
 import androidx.compose.ui.unit.dp
 
-/**
- * Corner philosophy:
- * - Small controls: 10dp
- * - Cards/surfaces: 16dp
- * - Large sheets/dialogs: 22dp
- */
-val ReplySenseShapes = Shapes(
-    extraSmall = RoundedCornerShape(8.dp),
-    small = RoundedCornerShape(10.dp),
-    medium = RoundedCornerShape(14.dp),
-    large = RoundedCornerShape(18.dp),
-    extraLarge = RoundedCornerShape(22.dp)
-)
+object Shape {
+    val card = RoundedCornerShape(16.dp)
+    val pill = RoundedCornerShape(50)
+}

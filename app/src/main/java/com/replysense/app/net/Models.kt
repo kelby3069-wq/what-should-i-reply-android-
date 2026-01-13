@@ -1,25 +1,32 @@
 package com.replysense.app.net
 
-import kotlinx.serialization.SerialName
-import kotlinx.serialization.Serializable
+import com.squareup.moshi.Json
+import com.squareup.moshi.JsonClass
 
-@Serializable
+@JsonClass(generateAdapter = true)
 data class ChatMessage(
-    @SerialName("role")
+    @Json(name = "role")
     val role: String,
-
-    @SerialName("content")
+    @Json(name = "content")
     val content: String
 )
 
-@Serializable
-data class ChatRequest(
-    @SerialName("messages")
+@JsonClass(generateAdapter = true)
+data class OpenAiChatRequest(
+    @Json(name = "model")
+    val model: String,
+    @Json(name = "messages")
     val messages: List<ChatMessage>
 )
 
-@Serializable
-data class ChatResponse(
-    @SerialName("reply")
-    val reply: String
-)
+@JsonClass(generateAdapter = true)
+data class OpenAiChatResponse(
+    @Json(name = "choices")
+    val choices: List<Choice>
+) {
+    @JsonClass(generateAdapter = true)
+    data class Choice(
+        @Json(name = "message")
+        val message: ChatMessage
+    )
+}

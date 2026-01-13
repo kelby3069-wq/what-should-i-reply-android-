@@ -1,0 +1,48 @@
+package com.replysense.app.domain.intelligence.features
+
+import org.junit.Assert.*
+import org.junit.Test
+
+class PhaseCFeatureExtractorTest {
+
+    private val extractor = PhaseCFeatureExtractor()
+
+    @Test
+    fun `detects escalation via punctuation`() {
+        val lines = listOf(
+            "Why are you doing this?",
+            "STOP IT!!",
+            "Do you even care?!"
+        )
+
+        val features = extractor.extract(lines)
+
+        assertTrue(features.exclamationDensity > 0f)
+        assertTrue(features.questionDensity > 0f)
+        assertTrue(features.escalationSlope > 0f)
+    }
+
+    @Test
+    fun `detects repair attempt`() {
+        val lines = listOf(
+            "I'm frustrated",
+            "Can we talk about this calmly?"
+        )
+
+        val features = extractor.extract(lines)
+
+        assertTrue(features.repairAttemptPresent)
+    }
+
+    @Test
+    fun `monologue flag triggers on long message`() {
+        val lines = listOf(
+            "ok",
+            "this is a very long message that dominates the conversation and keeps going"
+        )
+
+        val features = extractor.extract(lines)
+
+        assertTrue(features.monologueFlag)
+    }
+}

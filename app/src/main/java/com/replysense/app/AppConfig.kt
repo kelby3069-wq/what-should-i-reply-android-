@@ -1,7 +1,26 @@
 package com.replysense.app
 
+import com.replysense.app.domain.intelligence.PhaseCAnalysisEngine
+import com.replysense.app.domain.intelligence.features.PhaseCFeatureExtractor
+import com.replysense.app.domain.intelligence.inference.DeterministicInferenceEngine
+import com.replysense.app.domain.intelligence.inference.PhaseCInferenceEngine
+import com.replysense.app.domain.intelligence.keymoments.KeyMomentExtractor
+import com.replysense.app.domain.intelligence.parsing.SimpleSemanticParser
+
 object AppConfig {
-    // Explicitly qualify BuildConfig so there’s no import/package ambiguity.
-    val isDebug: Boolean = com.replysense.app.BuildConfig.DEBUG
-    val applicationId: String = com.replysense.app.BuildConfig.APPLICATION_ID
+
+    /**
+     * Canonical Phase C engine wiring.
+     * Matches actual constructor signatures.
+     */
+    val phaseCAnalysisEngine: PhaseCAnalysisEngine by lazy {
+        PhaseCAnalysisEngine(
+            featureExtractor = PhaseCFeatureExtractor(),
+            parser = SimpleSemanticParser(),
+            inferenceEngine = PhaseCInferenceEngine(
+                deterministicEngine = DeterministicInferenceEngine(),
+                keyMomentExtractor = KeyMomentExtractor()
+            )
+        )
+    }
 }

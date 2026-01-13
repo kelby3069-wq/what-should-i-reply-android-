@@ -1,20 +1,42 @@
 <?xml version="1.0" encoding="utf-8"?>
-<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+<manifest
+    xmlns:android="http://schemas.android.com/apk/res/android"
+    package="com.replysense.app">
+
+    <!-- Device capability (optional) -->
+    <uses-feature
+        android:name="android.hardware.telephony"
+        android:required="false" />
+
+    <!-- Permissions -->
+    <uses-permission android:name="android.permission.READ_SMS" />
 
     <application
+        android:name="com.replysense.app.ReplySenseApplication"
         android:allowBackup="true"
+        android:icon="@mipmap/ic_launcher"
         android:label="ReplySense"
+        android:roundIcon="@mipmap/ic_launcher_round"
         android:supportsRtl="true"
         android:theme="@style/Theme.ReplySense">
 
         <activity
-            android:name=".MainActivity"
-            android:exported="true"
-            android:theme="@style/Theme.ReplySense">
+            android:name="com.replysense.app.MainActivity"
+            android:exported="true">
+
+            <!-- App launcher -->
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
+
+            <!-- Share sheet: receive pasted conversation text -->
+            <intent-filter>
+                <action android:name="android.intent.action.SEND" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:mimeType="text/plain" />
+            </intent-filter>
+
         </activity>
 
     </application>
